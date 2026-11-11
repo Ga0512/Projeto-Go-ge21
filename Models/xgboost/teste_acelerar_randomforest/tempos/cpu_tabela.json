@@ -1,0 +1,14 @@
+{
+  "metodo": "cpu_tabela",
+  "descricao": "lookup na tabela (numpy, 1 nucleo)",
+  "nos": 0,
+  "modelo_bytes": 16777216,
+  "pixels": 295863990,
+  "segundos": 142.9826067219983,
+  "io": 109.48030159697373,
+  "calculo": 25.71412855196104,
+  "mpx_s_total": 2.0692306342914115,
+  "mpx_s_calculo": 11.505892155829503,
+  "pior_swap_gb": 0.0,
+  "bloco": 2048
+}

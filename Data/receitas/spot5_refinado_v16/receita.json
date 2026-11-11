@@ -1,0 +1,128 @@
+{
+ "script": "scripts/datasets/gerar_dataset_refinado.py",
+ "gerado_em": "2026-10-19T08:31:09",
+ "bandas": [
+  "PAN",
+  "GLCM_Entropia",
+  "Rugosidade_STD_Gradiente"
+ ],
+ "mascara": "códigos MapBiomas (39/41/62 -> 19), 0 = sem rótulo",
+ "parametros": {
+  "resolucao": 2.5,
+  "patch": 256,
+  "stride": 32,
+  "bloco": 1024,
+  "min_rotulo": 0.9,
+  "max_sobreposicao": 0.7,
+  "total": 0,
+  "janela": 7,
+  "niveis": 8,
+  "frac_validacao": 0.15,
+  "frac_teste": 0.15,
+  "blocos_estatistica": 64,
+  "lado_estatistica": 512,
+  "seed": 42,
+  "pan_zero_nodata": 1,
+  "zona_morta": 320,
+  "dobras": 0,
+  "sem_repetir_terreno": 1,
+  "buffer": 0
+ },
+ "cenas": [
+  {
+   "nome": "colinas_do_sul",
+   "pan": "dados/spot5/colinas_do_sul/original/Colinas_do_Sul_mosaico_v2.tif",
+   "mascara": "dados/spot5/colinas_do_sul/mascara_amostra_v1.tif",
+   "peso": 100.0,
+   "md5_mascara": {
+    "dados/spot5/colinas_do_sul/mascara_amostra_v1.tif": "c13736d0efc41b817094df9c59580370"
+   }
+  }
+ ],
+ "resultado": {
+  "por_cena": {
+   "colinas_do_sul": {
+    "grade": {
+     "epsg": "32722",
+     "largura": 29068,
+     "altura": 32624,
+     "geotransform": [
+      780496.7391778097,
+      2.5,
+      0.0,
+      8492018.461333567,
+      0.0,
+      -2.5
+     ],
+     "reamostrada": false
+    },
+    "candidatas": 25515,
+    "descartadas_fronteira": 4354,
+    "candidatas_por_split": {
+     "treino": 15642,
+     "validacao": 2276,
+     "teste": 3243
+    },
+    "estatisticas": {
+     "p2": 24.0,
+     "p98": 167.0,
+     "blocos": 64,
+     "media": {
+      "pan": 82.74036407470703,
+      "glcm": 1.5400274991989136,
+      "std": 19.086719512939453,
+      "grad": 103.55287170410156,
+      "rugosidade": -1.545347913634032e-06
+     },
+     "desvio": {
+      "pan": 31.399656295776367,
+      "glcm": 0.5079870820045471,
+      "std": 9.857151985168457,
+      "grad": 77.43170928955078,
+      "rugosidade": 0.911900520324707
+     }
+    },
+    "cabem_por_split": {
+     "treino": 2293,
+     "validacao": 344,
+     "teste": 476
+    },
+    "teto_sobreposicao_usado": 0.7,
+    "repeticao": {
+     "area_distinta_km2": 194.49,
+     "vezes_por_pixel_media": 6.56,
+     "vezes_por_pixel_max": 13,
+     "maior_sobreposicao": 0.656
+    },
+    "selecionadas_por_split": {
+     "treino": 2293,
+     "validacao": 344,
+     "teste": 476
+    }
+   }
+  },
+  "avisos": [],
+  "total_por_split": {
+   "treino": 2293,
+   "validacao": 344,
+   "teste": 476
+  },
+  "classes_por_split": {
+   "treino": {
+    "3": 0.8059,
+    "15": 0.1073,
+    "33": 0.0868
+   },
+   "validacao": {
+    "3": 0.7755,
+    "15": 0.2191,
+    "33": 0.0053
+   },
+   "teste": {
+    "3": 0.8333,
+    "15": 0.0414,
+    "33": 0.1253
+   }
+  }
+ }
+}

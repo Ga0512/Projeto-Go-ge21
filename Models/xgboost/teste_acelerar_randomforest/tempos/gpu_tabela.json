@@ -1,0 +1,15 @@
+{
+  "metodo": "gpu_tabela",
+  "descricao": "lookup na tabela (GPU)",
+  "nos": 0,
+  "modelo_bytes": 16777216,
+  "pixels": 295863990,
+  "segundos": 130.65413038800034,
+  "io": 112.6710489548932,
+  "calculo": 8.033556076967216,
+  "mpx_s_total": 2.264482486098067,
+  "mpx_s_calculo": 36.82852116365546,
+  "pior_swap_gb": 0.0,
+  "bloco": 2048,
+  "fatia": 1048576
+}

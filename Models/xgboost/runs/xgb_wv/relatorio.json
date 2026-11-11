@@ -1,0 +1,351 @@
+{
+  "args": {
+    "dataset": "../Data/dados/datasets/wv_jatai_v2",
+    "nome": "xgb_wv",
+    "janelas": [
+      25,
+      75,
+      155
+    ],
+    "margem": -1,
+    "max_amostras": 6000000,
+    "max_amostras_aval": 8000000,
+    "sem_balanceamento": false,
+    "n_estimadores": 2000,
+    "profundidade": 8,
+    "lr": 0.1,
+    "subsample": 0.8,
+    "colsample": 0.8,
+    "min_child_weight": 4,
+    "max_bin": 256,
+    "early_stopping": 50,
+    "verbose": 50,
+    "lote": 8,
+    "n_png": 8,
+    "seed": 42
+  },
+  "dataset": "/mnt/d/Projects/projeto-go/Data/dados/datasets/wv_jatai_v2",
+  "bandas": [
+    "PAN",
+    "GLCM_Entropia",
+    "Rugosidade_STD_Gradiente"
+  ],
+  "features": [
+    "PAN",
+    "GLCM_Entropia",
+    "Rugosidade_STD_Gradiente",
+    "PAN_media25",
+    "GLCM_Entropia_media25",
+    "Rugosidade_STD_Gradiente_media25",
+    "PAN_desvio25",
+    "GLCM_Entropia_desvio25",
+    "Rugosidade_STD_Gradiente_desvio25",
+    "PAN_media75",
+    "GLCM_Entropia_media75",
+    "Rugosidade_STD_Gradiente_media75",
+    "PAN_desvio75",
+    "GLCM_Entropia_desvio75",
+    "Rugosidade_STD_Gradiente_desvio75",
+    "PAN_media155",
+    "GLCM_Entropia_media155",
+    "Rugosidade_STD_Gradiente_media155",
+    "PAN_desvio155",
+    "GLCM_Entropia_desvio155",
+    "Rugosidade_STD_Gradiente_desvio155"
+  ],
+  "margem": 77,
+  "class_map": {
+    "3": 0,
+    "5": 0,
+    "6": 0,
+    "49": 0,
+    "4": 0,
+    "11": 0,
+    "12": 0,
+    "50": 0,
+    "15": 1,
+    "9": 1,
+    "19": 1,
+    "20": 1,
+    "21": 1,
+    "23": 1,
+    "24": 1,
+    "25": 1,
+    "29": 1,
+    "30": 1,
+    "32": 1,
+    "35": 1,
+    "36": 1,
+    "39": 1,
+    "40": 1,
+    "41": 1,
+    "46": 1,
+    "47": 1,
+    "48": 1,
+    "62": 1,
+    "75": 1,
+    "33": 2,
+    "31": 2
+  },
+  "classes": [
+    "Vegetação",
+    "Não vegetação",
+    "Água"
+  ],
+  "peso_classes": [
+    1.230193908827846,
+    0.4580909055782934,
+    241.12705494593834
+  ],
+  "amostras": {
+    "treino": 5999000,
+    "validacao": 7999800,
+    "teste": 7999800
+  },
+  "melhor_rodada": 203,
+  "val_mlogloss": 0.10847179738181041,
+  "tempo_treino_s": 40.6,
+  "xgboost": "2.1.4",
+  "treino": {
+    "rotulo": "TREINO (amostrado)",
+    "oa": 0.9709974995832639,
+    "miou": 0.9200400739156164,
+    "acuracia": [
+      0.9855446576384091,
+      0.9655254330940631,
+      1.0
+    ],
+    "precisao": [
+      0.9143252422945455,
+      0.9945896977008044,
+      0.8974136998160372
+    ],
+    "f1": [
+      0.9486000677405678,
+      0.9798420853310185,
+      0.9459336146914566
+    ],
+    "iou": [
+      0.9022257265149809,
+      0.9604807954158306,
+      0.8974136998160372
+    ],
+    "matriz_confusao": [
+      [
+        1601992,
+        22927,
+        570
+      ],
+      [
+        150111,
+        4214729,
+        378
+      ],
+      [
+        0,
+        0,
+        8293
+      ]
+    ],
+    "n_pixels": 5999000
+  },
+  "validacao": {
+    "rotulo": "VALIDACAO (amostrado)",
+    "oa": 0.9596684917122928,
+    "miou": 0.7166819139599929,
+    "acuracia": [
+      0.9229868578891233,
+      0.9735225589191291,
+      0.5025584577854465
+    ],
+    "precisao": [
+      0.9078946817617646,
+      0.9781397680706667,
+      0.5432706222865412
+    ],
+    "f1": [
+      0.9153785665164569,
+      0.975825701837916,
+      0.522122115934414
+    ],
+    "iou": [
+      0.8439613474873726,
+      0.952792609216096,
+      0.35329178517650994
+    ],
+    "matriz_confusao": [
+      [
+        1735063,
+        130869,
+        13903
+      ],
+      [
+        160852,
+        5925200,
+        299
+      ],
+      [
+        15169,
+        1552,
+        16893
+      ]
+    ],
+    "n_pixels": 7999800,
+    "por_cena": {
+      "jatai": {
+        "rotulo": "VALIDACAO (amostrado) | cena jatai",
+        "oa": 0.9596684917122928,
+        "miou": 0.7166819139599929,
+        "acuracia": [
+          0.9229868578891233,
+          0.9735225589191291,
+          0.5025584577854465
+        ],
+        "precisao": [
+          0.9078946817617646,
+          0.9781397680706667,
+          0.5432706222865412
+        ],
+        "f1": [
+          0.9153785665164569,
+          0.975825701837916,
+          0.522122115934414
+        ],
+        "iou": [
+          0.8439613474873726,
+          0.952792609216096,
+          0.35329178517650994
+        ],
+        "matriz_confusao": [
+          [
+            1735063,
+            130869,
+            13903
+          ],
+          [
+            160852,
+            5925200,
+            299
+          ],
+          [
+            15169,
+            1552,
+            16893
+          ]
+        ],
+        "n_pixels": 7999800
+      }
+    }
+  },
+  "teste": {
+    "rotulo": "TESTE (amostrado)",
+    "oa": 0.9008521463036576,
+    "miou": 0.6003003085185413,
+    "acuracia": [
+      0.7110300446983544,
+      0.9631994157196255,
+      0.9579315254676073
+    ],
+    "precisao": [
+      0.8833878321453347,
+      0.9163235900037392,
+      0.26868652029081536
+    ],
+    "f1": [
+      0.7878929343412747,
+      0.939176954806177,
+      0.4196632996632997
+    ],
+    "iou": [
+      0.6500192570968065,
+      0.8853285748845888,
+      0.26555309357422874
+    ],
+    "matriz_confusao": [
+      [
+        1405887,
+        526578,
+        44789
+      ],
+      [
+        184714,
+        5771148,
+        35782
+      ],
+      [
+        871,
+        429,
+        29602
+      ]
+    ],
+    "n_pixels": 7999800,
+    "por_cena": {
+      "jatai": {
+        "rotulo": "TESTE (amostrado) | cena jatai",
+        "oa": 0.9008521463036576,
+        "miou": 0.6003003085185413,
+        "acuracia": [
+          0.7110300446983544,
+          0.9631994157196255,
+          0.9579315254676073
+        ],
+        "precisao": [
+          0.8833878321453347,
+          0.9163235900037392,
+          0.26868652029081536
+        ],
+        "f1": [
+          0.7878929343412747,
+          0.939176954806177,
+          0.4196632996632997
+        ],
+        "iou": [
+          0.6500192570968065,
+          0.8853285748845888,
+          0.26555309357422874
+        ],
+        "matriz_confusao": [
+          [
+            1405887,
+            526578,
+            44789
+          ],
+          [
+            184714,
+            5771148,
+            35782
+          ],
+          [
+            871,
+            429,
+            29602
+          ]
+        ],
+        "n_pixels": 7999800
+      }
+    }
+  },
+  "importancia_ganho": {
+    "Rugosidade_STD_Gradiente": 0.6276874998731765,
+    "GLCM_Entropia": 0.11370111820140665,
+    "PAN_media155": 0.05948384188162919,
+    "Rugosidade_STD_Gradiente_media155": 0.047117975896826925,
+    "GLCM_Entropia_media25": 0.03142159636997598,
+    "PAN_media75": 0.025624496602091897,
+    "Rugosidade_STD_Gradiente_media75": 0.021836350172391425,
+    "GLCM_Entropia_media75": 0.010286355933190107,
+    "PAN_desvio155": 0.009374090457443744,
+    "PAN_desvio25": 0.00841293489067841,
+    "GLCM_Entropia_desvio155": 0.007745483592876083,
+    "PAN_desvio75": 0.005894034942817142,
+    "Rugosidade_STD_Gradiente_desvio155": 0.0055709789574352065,
+    "GLCM_Entropia_desvio75": 0.004878516884350372,
+    "Rugosidade_STD_Gradiente_media25": 0.004598685413284879,
+    "GLCM_Entropia_media155": 0.0042222322643703045,
+    "PAN_media25": 0.0036757058435346744,
+    "GLCM_Entropia_desvio25": 0.0035650317140894254,
+    "Rugosidade_STD_Gradiente_desvio75": 0.0018763295834593966,
+    "Rugosidade_STD_Gradiente_desvio25": 0.0015879354473220114,
+    "PAN": 0.0014388050776496801
+  }
+}

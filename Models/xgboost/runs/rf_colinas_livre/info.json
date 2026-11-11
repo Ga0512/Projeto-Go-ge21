@@ -1,0 +1,19 @@
+{
+  "nome": "rf_colinas_livre",
+  "arvores": 500,
+  "max_profundidade": null,
+  "treino_px": 300000,
+  "validacao_px": 1000000,
+  "segundos_treino": 24.386166451999998,
+  "nos": 37111334,
+  "profundidade": 75,
+  "cpu_mpx_s": 0.05211159619324143,
+  "cpu_segundos": 3.8379173659996013,
+  "cpu_pixels": 200000,
+  "acuracia_validacao": 0.783718,
+  "classes": [
+    3,
+    15,
+    33
+  ]
+}

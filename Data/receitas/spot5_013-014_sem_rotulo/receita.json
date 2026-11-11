@@ -1,0 +1,98 @@
+{
+ "script": "scripts/datasets/gerar_patches_sem_rotulo.py",
+ "gerado_em": "2026-09-23T11:00:16",
+ "bandas": [
+  "PAN",
+  "GLCM_Entropia",
+  "Rugosidade_STD_Gradiente"
+ ],
+ "rotulo": "nenhum (só imagem)",
+ "parametros": {
+  "resolucao": 2.5,
+  "patch": 256,
+  "stride": 0,
+  "min_valido": 1.0,
+  "janela": 7,
+  "niveis": 8,
+  "blocos_estatistica": 64,
+  "lado_estatistica": 512,
+  "seed": 42
+ },
+ "cena": {
+  "nome": "cena_013-014_2007-06-14",
+  "pan": "dados/spot5/cena_013-014_2007-06-14/original/013-014_S5_708-378-0_2007-06-14_modificado.tif",
+  "excluir": [
+   {
+    "mascara": "dados/spot5/cena_013-014_2007-06-14/tiles",
+    "md5": {
+     "dados/spot5/cena_013-014_2007-06-14/tiles/r06_c08/mascara_refinada.tif": "651b99c3f795e70675accd86e86a8ed2"
+    },
+    "tiles_refinados": [
+     "r06_c08"
+    ]
+   },
+   {
+    "mascara": "dados/spot5/colinas_do_sul/tiles",
+    "md5": {
+     "dados/spot5/colinas_do_sul/tiles/r00_c06/mascara_refinada.tif": "c8ee2b7c80233107c87c1f653a2cd15d",
+     "dados/spot5/colinas_do_sul/tiles/r04_c02/mascara_refinada.tif": "df090cc64baf000f9d3bc384468ba697",
+     "dados/spot5/colinas_do_sul/tiles/r06_c05/mascara_refinada.tif": "077ddd472b9373322eeb3dbf49d65519",
+     "dados/spot5/colinas_do_sul/tiles/r07_c03/mascara_refinada.tif": "8a53eae6ac1a9a5565acd1cbbde346d3",
+     "dados/spot5/colinas_do_sul/tiles/r10_c05/mascara_refinada.tif": "2e2ba3c2d90e27336f4cde560a7c4239",
+     "dados/spot5/colinas_do_sul/tiles/r11_c06/mascara_refinada.tif": "10e0c01a719e473143fe75745aaada49"
+    },
+    "tiles_refinados": [
+     "r00_c06",
+     "r04_c02",
+     "r06_c05",
+     "r07_c03",
+     "r10_c05",
+     "r11_c06"
+    ]
+   }
+  ],
+  "estatisticas_de": {
+   "receita": "dados/datasets/spot5_refinado_v7/receita.json",
+   "cena": "cena_013-014_2007-06-14"
+  }
+ },
+ "estatisticas": {
+  "p2": 60.0,
+  "p98": 152.0,
+  "blocos": 64,
+  "media": {
+   "pan": 91.89791107177734,
+   "glcm": 1.339890480041504,
+   "std": 18.04560661315918,
+   "grad": 97.08088684082031,
+   "rugosidade": 3.548047970980406e-07
+  },
+  "desvio": {
+   "pan": 23.81611442565918,
+   "glcm": 0.7714253067970276,
+   "std": 12.23353385925293,
+   "grad": 85.39518737792969,
+   "rugosidade": 0.9344046115875244
+  }
+ },
+ "resultado": {
+  "grade": {
+   "epsg": "32722",
+   "largura": 29488,
+   "altura": 29067,
+   "geotransform": [
+    755450.0271934678,
+    2.5,
+    0.0,
+    8484599.215753447,
+    0.0,
+    -2.5
+   ],
+   "reamostrada": false
+  },
+  "janelas_validas": 8791,
+  "excluidas_area_rotulada": 391,
+  "patches": 8400,
+  "area_km2": 3440.6
+ }
+}

@@ -1,0 +1,233 @@
+{
+ "script": "scripts/datasets/gerar_dataset_refinado.py",
+ "gerado_em": "2026-10-28T11:31:48",
+ "bandas": [
+  "PAN",
+  "GLCM_Entropia",
+  "Rugosidade_STD_Gradiente"
+ ],
+ "mascara": "códigos MapBiomas (39/41/62 -> 19), 0 = sem rótulo",
+ "parametros": {
+  "resolucao": 0.485844,
+  "patch": 512,
+  "stride": 64,
+  "bloco": 512,
+  "min_rotulo": 0.9,
+  "min_valido": 0.9,
+  "max_sobreposicao": 0.7,
+  "total": 2000,
+  "janela": 7,
+  "niveis": 8,
+  "frac_validacao": 0.15,
+  "frac_teste": 0.15,
+  "blocos_estatistica": 64,
+  "lado_estatistica": 512,
+  "seed": 42,
+  "pan_zero_nodata": 1,
+  "grade_nativa": 1,
+  "zona_morta": 0,
+  "dobras": 0,
+  "sem_repetir_terreno": 1,
+  "buffer": 0,
+  "split_regioes": [
+   {
+    "grupo": "treino",
+    "unidade": "b3595",
+    "janela": [
+     37844,
+     111471,
+     48419,
+     121604
+    ]
+   },
+   {
+    "grupo": "treino",
+    "unidade": "b4549",
+    "janela": [
+     100582,
+     172228,
+     111159,
+     182348
+    ]
+   },
+   {
+    "grupo": "treino",
+    "unidade": "b5178",
+    "janela": [
+     142811,
+     142202,
+     153369,
+     152312
+    ]
+   },
+   {
+    "grupo": "treino",
+    "unidade": "b5337",
+    "janela": [
+     153290,
+     152311,
+     163848,
+     162417
+    ]
+   },
+   {
+    "grupo": "treino",
+    "unidade": "b5342",
+    "janela": [
+     153092,
+     202657,
+     163664,
+     212764
+    ]
+   },
+   {
+    "grupo": "treino",
+    "unidade": "A_lago21ha",
+    "janela": [
+     195200,
+     218199,
+     200038,
+     222955
+    ]
+   },
+   {
+    "grupo": "validacao",
+    "unidade": "b3916",
+    "janela": [
+     58546,
+     161938,
+     69129,
+     172066
+    ]
+   },
+   {
+    "grupo": "validacao",
+    "unidade": "C_lago7ha",
+    "janela": [
+     195200,
+     212858,
+     205765,
+     215579
+    ]
+   },
+   {
+    "grupo": "teste",
+    "unidade": "b4067",
+    "janela": [
+     69489,
+     91517,
+     80051,
+     101643
+    ]
+   },
+   {
+    "grupo": "teste",
+    "unidade": "B_lago10ha",
+    "janela": [
+     202773,
+     218199,
+     205765,
+     222955
+    ]
+   }
+  ],
+  "split_regioes_arquivo": "dados/wv1/jatai/blocos/split_regioes.json"
+ },
+ "cenas": [
+  {
+   "nome": "jatai",
+   "pan": "dados/wv1/jatai/jatai_vantor_4674.tif",
+   "mascara": "dados/wv1/jatai/blocos/mascara_gt_cena.vrt",
+   "peso": 1.0,
+   "md5_mascara": {
+    "dados/wv1/jatai/blocos/mascara_gt_cena.vrt": "08df93dba2f99bd3b77fc85a16323699"
+   }
+  }
+ ],
+ "resultado": {
+  "por_cena": {
+   "jatai": {
+    "grade": {
+     "epsg": "4674",
+     "largura": 274176,
+     "altura": 293760,
+     "geotransform": [
+      -52.3828125,
+      4.487879136029412e-06,
+      0.0,
+      -17.2265625,
+      0.0,
+      -4.487879136029412e-06
+     ],
+     "reamostrada": false
+    },
+    "candidatas": 145275,
+    "descartadas_fronteira": 12465,
+    "candidatas_por_split": {
+     "treino": 100103,
+     "validacao": 13480,
+     "teste": 19227
+    },
+    "estatisticas": {
+     "p2": 36.0,
+     "p98": 176.0,
+     "blocos": 64,
+     "media": {
+      "pan": 97.27399444580078,
+      "glcm": 1.6444686651229858,
+      "std": 20.27440643310547,
+      "grad": 113.53839111328125,
+      "rugosidade": 7.141788955777884e-07
+     },
+     "desvio": {
+      "pan": 34.142181396484375,
+      "glcm": 0.6266180276870728,
+      "std": 10.357034683227539,
+      "grad": 87.37763214111328,
+      "rugosidade": 0.9151727557182312
+     }
+    },
+    "cabem_por_split": {
+     "treino": 14135,
+     "validacao": 1952,
+     "teste": 2769
+    },
+    "teto_sobreposicao_usado": 0.25,
+    "repeticao": {
+     "area_distinta_km2": 104.22,
+     "vezes_por_pixel_media": 1.19,
+     "vezes_por_pixel_max": 4,
+     "maior_sobreposicao": 0.25
+    },
+    "selecionadas_por_split": {
+     "treino": 1400,
+     "validacao": 300,
+     "teste": 300
+    }
+   }
+  },
+  "avisos": [],
+  "total_por_split": {
+   "treino": 1400,
+   "validacao": 300,
+   "teste": 300
+  },
+  "classes_por_split": {
+   "treino": {
+    "3": 0.2588,
+    "15": 0.7402,
+    "33": 0.0011
+   },
+   "validacao": {
+    "3": 0.2196,
+    "15": 0.773,
+    "33": 0.0074
+   },
+   "teste": {
+    "3": 0.2706,
+    "15": 0.7258,
+    "33": 0.0036
+   }
+  }
+ }
+}

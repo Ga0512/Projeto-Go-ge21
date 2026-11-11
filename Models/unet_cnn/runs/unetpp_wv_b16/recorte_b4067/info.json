@@ -1,0 +1,47 @@
+{
+  "run": "unetpp_wv_b16",
+  "modelo": "/mnt/d/Projects/projeto-go/Models/unet_cnn/runs/unetpp_wv_b16/modelo_melhor.pth",
+  "arquitetura": "unetpp",
+  "base": 16,
+  "epoca": 2,
+  "val_miou": 0.5982777996758267,
+  "imagem": "/mnt/d/Projects/projeto-go/Data/dados/wv1/jatai/recorte_teste/jatai_b4067.tif",
+  "cena": "jatai",
+  "dataset": "/mnt/d/Projects/projeto-go/Data/dados/datasets/wv_jatai_v2",
+  "passo": 128,
+  "margem_peso": 77,
+  "texturas": "_wv2",
+  "classes": [
+    "Vegetação",
+    "Não vegetação",
+    "Água"
+  ],
+  "repr_codigo": [
+    3,
+    15,
+    33
+  ],
+  "estatisticas": {
+    "p2": 36.0,
+    "p98": 176.0,
+    "blocos": 64,
+    "media": {
+      "pan": 97.27399444580078,
+      "glcm": 1.6444686651229858,
+      "std": 20.27440643310547,
+      "grad": 113.53839111328125,
+      "rugosidade": 7.141788955777884e-07
+    },
+    "desvio": {
+      "pan": 34.142181396484375,
+      "glcm": 0.6266180276870728,
+      "std": 10.357034683227539,
+      "grad": 87.37763214111328,
+      "rugosidade": 0.9151727557182312
+    }
+  },
+  "faixas": 10,
+  "px_classificados": 100113454,
+  "tempo_predicao_s": 44.0,
+  "tempo_total_s": 75.8
+}

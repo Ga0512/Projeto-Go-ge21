@@ -1,0 +1,87 @@
+# ---------------------------------------------------------------------------
+# projeto-go -- o que NAO vai para o GitHub.
+#
+# Regra geral: sobe codigo e REGISTRO de experimento; nao sobe imagem, dataset,
+# checkpoint nem saida de inferencia. Nao e preferencia de estilo: os originais
+# SPOT5/WorldView passam de 30 GB e o GitHub recusa arquivo acima de 100 MB.
+# O dado se recria a partir da receita.json de cada dataset (ver README).
+# ---------------------------------------------------------------------------
+
+# --- ambientes virtuais (Linux/WSL, ~2 GB, nao sao portateis) ---
+.venv/
+Data/.venv/
+venv/
+env/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# --- DADO BRUTO E DATASETS (dezenas de GB) ---
+# cenas, mosaicos, texturas, mascaras, patches empacotados
+Data/dados/
+Data/_para_apagar/
+Data/experimentos/
+
+# --- ARTEFATOS DE TREINO E INFERENCIA ---
+# modelo_melhor.pth ~23 MB, ultimo.pth ~64 MB, faixas de cena em GB
+Models/.cache/
+Models/vit_model/dados/
+Models/*/inferencias/
+
+# runs/: ignora tudo, MENOS o registro textual do experimento.
+# O "!.../**/" e necessario para o git conseguir descer nas subpastas; sem ele
+# as excecoes abaixo nunca sao alcancadas.
+Models/*/runs/**
+!Models/*/runs/**/
+!Models/*/runs/**/relatorio.json
+!Models/*/runs/**/log.csv
+!Models/*/runs/**/info.json
+!Models/*/runs/**/args.json
+
+# --- pesos e rasters, onde quer que apareçam ---
+*.pth
+*.pt
+*.ubj
+*.onnx
+*.tif
+*.tiff
+*.vrt
+*.img
+*.jp2
+*.gpkg
+*.shp
+*.dbf
+*.shx
+*.prj
+*.sbn
+*.sbx
+
+# --- arrays serializados (tabelas de lookup, caches de feature) ---
+*.npz
+*.npy
+
+# --- saidas de experimento solto fora de runs/ ---
+Models/xgboost/teste_acelerar_randomforest/mapas/
+
+# --- saidas grandes de visualizacao ---
+*.mp4
+*.zip
+*.7z
+*.tar.gz
+
+# --- sistema / editor ---
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.bak
+*.orig
+.vscode/
+.idea/
+
+# --- local, nao compartilhavel ---
+.claude/settings.local.json
+*.log

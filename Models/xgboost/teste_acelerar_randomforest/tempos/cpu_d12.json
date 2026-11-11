@@ -1,0 +1,14 @@
+{
+  "metodo": "cpu_d12",
+  "descricao": "sklearn rf.predict (CPU, fatias de 262144 px)",
+  "nos": 1552486,
+  "modelo_bytes": 0,
+  "pixels": 295863990,
+  "segundos": 1168.9856004389949,
+  "io": 124.92857943006675,
+  "calculo": 1034.9552269740234,
+  "mpx_s_total": 0.2530946402495401,
+  "mpx_s_calculo": 0.285871294031762,
+  "pior_swap_gb": 0.0,
+  "bloco": 2048
+}

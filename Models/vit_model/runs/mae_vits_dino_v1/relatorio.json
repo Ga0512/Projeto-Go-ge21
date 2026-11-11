@@ -1,0 +1,121 @@
+{
+  "args": {
+    "dataset": "/mnt/d/Projects/projeto-go/Data/dados/datasets/spot5_refinado",
+    "nome": "mae_vits_dino_v1",
+    "arquitetura": "vit_small_patch16_224.dino",
+    "sem_pesos": false,
+    "img": 224,
+    "epocas": 800,
+    "lote": 64,
+    "lr": 0.0002,
+    "lr_encoder_mult": 0.25,
+    "wd": 0.05,
+    "aquecimento": 20,
+    "congelar": 10,
+    "razao_mascara": 0.75,
+    "dec_dim": 256,
+    "dec_prof": 4,
+    "val_cada": 20,
+    "probe_cada": 100,
+    "n_png": 8,
+    "seed": 42,
+    "resume": false
+  },
+  "dataset": "/mnt/d/Projects/projeto-go/Data/dados/datasets/spot5_refinado",
+  "bandas": [
+    "PAN",
+    "GLCM_Entropia",
+    "Rugosidade_STD_Gradiente"
+  ],
+  "patches": {
+    "treino": 350,
+    "validacao": 76
+  },
+  "params": {
+    "encoder": 21665664,
+    "decoder": 3455744
+  },
+  "tempo_treino_s": 1286.3,
+  "timm": "1.0.29",
+  "torch": "2.13.0+cu130",
+  "ultimo": {
+    "epoca": 800,
+    "lr": 2.253087340031712e-11,
+    "loss_treino": 0.8317869186401368,
+    "encoder_congelado": 0,
+    "tempo_s": 1.17,
+    "loss_val": 0.8001290653881273,
+    "val_PAN": 0.8943210244178772,
+    "val_GLCM_Entropia": 0.5781518816947937,
+    "val_Rugosidade_STD_Gradiente": 0.9279143810272217,
+    "probe_oa": 0.9400185032894737,
+    "probe_miou": 0.8859776822933071
+  },
+  "probe_inicial": {
+    "epoca": 0,
+    "oa": 0.9326685855263158,
+    "miou": 0.8725312978018449,
+    "iou": [
+      0.8432055749128919,
+      0.887302336558886,
+      0.8870859819337571
+    ],
+    "n": 19456,
+    "por_cena": {
+      "recorte_2007-09-10": {
+        "oa": 0.9159128289473685,
+        "miou": 0.5461842308551103,
+        "iou": [
+          0.7336473050758765,
+          0.904905387489454,
+          0.0
+        ],
+        "n": 9728
+      },
+      "cena_013-014_2007-06-14": {
+        "oa": 0.9494243421052632,
+        "miou": 0.6310504740422435,
+        "iou": [
+          0.8907563025210085,
+          0.062146892655367235,
+          0.9402482269503546
+        ],
+        "n": 9728
+      }
+    }
+  },
+  "probe_final": {
+    "epoca": 800,
+    "oa": 0.9400185032894737,
+    "miou": 0.8859776822933071,
+    "iou": [
+      0.8420896408429801,
+      0.9121945074326027,
+      0.9036488986043383
+    ],
+    "n": 19456,
+    "por_cena": {
+      "recorte_2007-09-10": {
+        "oa": 0.9106702302631579,
+        "miou": 0.5531290848255513,
+        "iou": [
+          0.6752751905165114,
+          0.918209485163581,
+          0.0659025787965616
+        ],
+        "n": 9728
+      },
+      "cena_013-014_2007-06-14": {
+        "oa": 0.9693667763157895,
+        "miou": 0.6293356326223413,
+        "iou": [
+          0.9321297989031079,
+          0.0,
+          0.9558770989639157
+        ],
+        "n": 9728
+      }
+    }
+  },
+  "melhor_probe_miou": 0.8859776822933071
+}

@@ -1,0 +1,15 @@
+{
+  "metodo": "gpu_d12",
+  "descricao": "kernel Triton na GPU",
+  "nos": 1552486,
+  "modelo_bytes": 62099440,
+  "pixels": 295863990,
+  "segundos": 166.07548340399808,
+  "io": 113.51278136700421,
+  "calculo": 43.16019084802974,
+  "mpx_s_total": 1.7815031089223217,
+  "mpx_s_calculo": 6.855020429398916,
+  "pior_swap_gb": 0.0,
+  "bloco": 2048,
+  "fatia": 1048576
+}

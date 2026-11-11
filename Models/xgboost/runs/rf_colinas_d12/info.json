@@ -1,0 +1,19 @@
+{
+  "nome": "rf_colinas_d12",
+  "arvores": 500,
+  "max_profundidade": 12,
+  "treino_px": 300000,
+  "validacao_px": 3000000,
+  "segundos_treino": 17.783873519999815,
+  "nos": 1552486,
+  "profundidade": 12,
+  "cpu_mpx_s": 0.28470087651303644,
+  "cpu_segundos": 1.7562292259999595,
+  "cpu_pixels": 500000,
+  "acuracia_validacao": 0.8023303333333334,
+  "classes": [
+    3,
+    15,
+    33
+  ]
+}
