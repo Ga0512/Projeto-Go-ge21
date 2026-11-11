@@ -1,10 +1,23 @@
-# projeto-go — LULC em SPOT5 pancromática (2,5 m)
+# projeto-go — LULC a partir de imagem pancromática
 
-Classificação de uso e cobertura do solo (vegetação / não vegetação / água) sobre
-imagem SPOT5 pancromática de 2,5 m, no estado de Goiás. Três famílias de modelo
-treinadas e comparadas no mesmo dado e sob o mesmo contrato de avaliação:
+Classificação de uso e cobertura do solo (vegetação / não vegetação / água) a
+partir de **uma única banda pancromática**, no estado de Goiás. Três famílias de
+modelo treinadas e comparadas no mesmo dado e sob o mesmo contrato de avaliação:
 **U-Net++** (CNN), **ViT+MAE** (transformer com pré-treino auto-supervisionado)
 e **XGBoost** por pixel.
+
+O método não depende do sensor — ele depende de ter PAN e um rótulo. Dois
+sensores já foram percorridos de ponta a ponta:
+
+| sensor | resolução | patch | datasets | runs |
+|---|---|---|---|---|
+| SPOT5 | 2,5 m | 256 px | `spot5_refinado` … `_v18` | `unetpp_v*`, `seg_mae_v3_*`, `xgb_spot5_v*` |
+| WorldView-1 | 0,486 m | 512 px | `wv_jatai_v1`, `_v2` | `unetpp_wv_b16`, `unetpp_wv_ft`, `xgb_wv`, `rf_wv_d12` |
+
+O patch dobra no WorldView justamente para compensar a resolução 5× maior: o
+que importa para o modelo é quanto **terreno** cabe na janela, não quantos
+pixels. 256 px a 2,5 m e 512 px a 0,486 m são 640 m e 249 m de chão — ainda não
+é equivalência, e essa diferença é um dos eixos em aberto do projeto.
 
 O repositório tem duas metades que **precisam continuar vizinhas**:
 
@@ -183,11 +196,35 @@ A inferência de cena inteira é **resumível**: ela grava faixa por faixa e um
 `progresso.txt`, então rodar de novo continua de onde parou. Uma cena de 2,9 Gpx
 levou ~3 h numa RTX 3060 Laptop de 6 GB.
 
-### 5. Sobre outro sensor (WorldView)
+### 5. WorldView: o mesmo método, um preparo diferente
 
-Os datasets `wv_jatai_v1`/`v2` e os runs `unetpp_wv_*` são de WorldView, e as
-receitas deles também estão em `Data/receitas/`. O pipeline é o mesmo — muda a
-resolução e as estatísticas da cena.
+O treino, a avaliação e a inferência são **os mesmos scripts** — o que muda é
+como a cena e o rótulo chegam até eles.
+
+No SPOT5 a máscara é desenhada à mão sobre a própria imagem (o editor em
+`Data/scripts/spot5/tiles_cena.py`), e é ground truth de verdade na resolução da
+cena. No WorldView-1 não existe rótulo nessa resolução, então
+`Data/scripts/wv1/gerar_dataset_wv1.py` monta o par de outro jeito:
+
+1. lê o GeoTIFF WorldView-1 PAN (0,486 m) e extrai CRS, transform e footprint;
+2. usa o footprint real como ROI e baixa do Google Earth Engine o **MapBiomas
+   Coverage 10 m, Collection 3 beta** (ano 2024) recortado nessa ROI;
+3. reamostra o MapBiomas para a grade **exata** da PAN com **nearest-neighbor**
+   (nunca bilinear ou bicúbica — são códigos categóricos, interpolar inventa
+   classe que não existe);
+4. grava `pan.tif`, `mask.tif` e o par empilhado, valida o alinhamento e gera
+   relatório.
+
+A consequência metodológica está escrita no próprio script e vale repetir aqui:
+**a máscara do WorldView é pseudo-rótulo derivado de um produto de 10 m, não
+ground truth de 0,5 m.** Um erro de borda de 10 m são ~20 pixels de WorldView.
+Comparar o número do WorldView com o do SPOT5 sem levar isso em conta é
+comparar coisas diferentes.
+
+Depois do par montado, o resto dos scripts de `Data/scripts/wv1/`
+(`gerar_features_pan.py`, `gerar_patches_treino.py`, `gerar_blocos_gt.py`,
+`gerar_mascara_manual.py`, `suavizar_mascara.py`, `agregar_pan.py`) produzem os
+patches, e daí em diante o caminho é idêntico ao do SPOT5.
 
 Aviso honesto: existe um `Models/sensores.py` com presets por sensor, mas ele
 **ainda não está conectado a nenhum script**. Hoje o ajuste por sensor é feito
@@ -198,7 +235,9 @@ nos argumentos de linha de comando, não por preset.
 ## Convenções que importam
 
 - **Run = `<modelo>_v<N>`**, onde `v<N>` é a versão do dataset: `unetpp_v18` foi
-  treinado em `spot5_refinado_v18`.
+  treinado em `spot5_refinado_v18`. Os runs de WorldView fogem dessa regra e
+  levam o sensor no nome (`unetpp_wv_b16`, `xgb_wv`), porque os datasets deles
+  não seguem a mesma numeração.
 - As métricas são calculadas duas vezes: no patch **inteiro** e no **interior**
   (margem de 15 px). Comparação entre famílias de modelo usa **sempre o
   interior**, porque as janelas de feature do XGBoost só cabem inteiras ali.
