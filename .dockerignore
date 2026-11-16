@@ -1,4 +1,9 @@
 # O dado NUNCA entra na imagem — vem pelo volume (ver docker/LEIAME.md).
+# Pacotes de dataset: se um .tar.gz ficar na pasta do repositorio, o build
+# manda os GB dele para o daemon antes de comecar. Fica de fora.
+*.tar.gz
+*.tar
+*.zip
 Data/dados/
 Data/_para_apagar/
 Data/experimentos/
