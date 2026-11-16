@@ -37,6 +37,7 @@ Models/*/inferencias/
 Models/*/runs/**
 !Models/*/runs/**/
 !Models/*/runs/**/relatorio.json
+!Models/*/runs/**/relatorio_completo.json
 !Models/*/runs/**/log.csv
 !Models/*/runs/**/info.json
 !Models/*/runs/**/args.json

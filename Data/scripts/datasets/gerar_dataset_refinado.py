@@ -114,6 +114,14 @@ PARAMETROS = {
     "zona_morta": 0,       # m entre grupos (blockCV): janela perto de bloco de outro
                            # grupo é descartada. >= alcance da autocorrelação
     "dobras": 0,           # k-fold espacial: 0 = treino/validação/teste; k = k dobras
+    "ordenar_raras": 0,    # 1 = visita as candidatas em ordem decrescente de
+                           # conteúdo de classe rara da cena, em vez de sorteio.
+                           # Muda a COMPOSIÇÃO do dataset sem repetir tensor: o
+                           # teto de sobreposição continua valendo. Use com
+                           # --total para escolher onde parar na curva (ver a
+                           # docstring de sortear()). Com isso ligado, a busca
+                           # pelo menor teto é desligada: baixar o teto espalha
+                           # as janelas e desfaz o rebalanceamento em silêncio.
     "sem_repetir_terreno": 1,  # cenas podem cobrir o mesmo chão (Colinas x 013-014): a cena
                            # seguinte não pega patches onde a anterior já rotulou
     "buffer": 0,           # m, buffer NEGATIVO nas máscaras (erode cada classe): remove a
@@ -488,6 +496,15 @@ def candidatos_e_splits(c, par, rng, ocupado=None):
         ok &= media_janela(ocupado)[:ny, :nx] <= 0
     cy, cx = np.nonzero(ok)
     ys, xs = cy * S, cx * S
+    # escore = fração da janela ocupada pelas classes RARAS DA CENA (as que não
+    # são a majoritária ali). É o que o --ordenar-raras usa para decidir a ordem
+    # de visita; fica em `c.escores` para o sorteio achar depois.
+    fc = np.stack([media_janela(cls[j])[:ny, :nx] for j in range(config.N_CLASSES)])
+    tot = np.clip(fc.sum(0), 1e-9, None)
+    dom = int(np.argmax(fc.sum((1, 2))))          # classe majoritária da cena
+    raro = (fc.sum(0) - fc[dom]) / tot
+    c.escores = {(int(a), int(b)): float(raro[i, j])
+                 for a, b, i, j in zip(ys, xs, cy, cx)}
     if not len(ys):
         raise SystemExit("%s: nenhuma janela com >= %.0f%% rotulado"
                          % (c.nome, 100 * par["min_rotulo"]))
@@ -555,16 +572,31 @@ def candidatos_e_splits(c, par, rng, ocupado=None):
     return por_split, len(ys), int((~fica).sum())
 
 
-def sortear(cand, P, teto, rng):
-    """Visita as candidatas em ordem aleatória e aceita a janela se ela não
-    divide mais que `teto` da área com nenhuma já aceita. Devolve as aceitas
-    na ordem de aceitação (um prefixo dela é uma amostra espalhada)."""
+def sortear(cand, P, teto, rng, escores=None):
+    """Visita as candidatas e aceita a janela se ela não divide mais que `teto`
+    da área com nenhuma já aceita. Devolve as aceitas na ordem de aceitação (um
+    prefixo dela é uma amostra espalhada).
+
+    Sem `escores`, a ordem é aleatória -- o comportamento histórico. Com
+    `escores` ({(y, x): valor}), visita em ordem DECRESCENTE de escore: é assim
+    que se força composição de classes, já que o `balancear()` depois corta um
+    prefixo. Medido na Colinas: visitando por conteúdo de classe rara, o
+    prefixo de 3400 patches sai com 68/16/15 em vez dos 79/11/10 do sorteio,
+    perdendo 12% de área distinta. O teto continua valendo, então as janelas
+    seguem sendo recortes distintos, não repetição do mesmo tensor."""
     if not cand:
         return []
     ys, xs = np.array(cand).T
     ay, ax = np.empty(len(ys), int), np.empty(len(ys), int)
     n, lim = 0, teto * P * P + 1e-6
-    for i in rng.permutation(len(ys)):
+    if escores is None:
+        ordem = rng.permutation(len(ys))
+    else:
+        v = np.array([escores.get((int(y), int(x)), 0.0) for y, x in zip(ys, xs)])
+        # desempate aleatório: sem isso, patches de escore igual (muito comum,
+        # p.ex. 0 em toda janela só de vegetação) entrariam em ordem de varredura
+        ordem = np.lexsort((rng.random(len(v)), -v))
+    for i in ordem:
         if n:
             ov = np.clip(P - np.abs(ax[:n] - xs[i]), 0, None) * np.clip(P - np.abs(ay[:n] - ys[i]), 0, None)
             if ov.max() > lim:
@@ -884,8 +916,9 @@ def main():
             info[c.nome]["estatisticas"] = c.stats
 
     def sorteio(i, c, teto):
+        esc = getattr(c, "escores", None) if par.get("ordenar_raras") else None
         return {s: sortear(candidatos[c.nome][s], P, teto,
-                           np.random.default_rng([par["seed"], i, 3, j]))
+                           np.random.default_rng([par["seed"], i, 3, j]), esc)
                 for j, s in enumerate(SPLITS)}
 
     def selecionar(teto):
@@ -895,6 +928,8 @@ def main():
         aceitas = {c.nome: sorteio(i, c, teto) for i, c in enumerate(cenas)}
         escolha, avisos = balancear(cenas, aceitas, p)
         tetos = {}
+        if par.get("ordenar_raras"):      # ver o comentário em PARAMETROS
+            return aceitas, escolha, avisos, {c.nome: teto for c in cenas}
         for i, c in enumerate(cenas):
             cota = {s: len(escolha[c.nome][s]) for s in SPLITS}
             for t in [round(v, 2) for v in np.arange(0.05, teto, 0.05)] + [teto]:

@@ -1,0 +1,34 @@
+# O dado NUNCA entra na imagem — vem pelo volume (ver docker/LEIAME.md).
+Data/dados/
+Data/_para_apagar/
+Data/experimentos/
+Data/receitas/
+
+# artefatos de treino: ficam no volume
+Models/*/runs/
+Models/*/inferencias/
+Models/.cache/
+Models/vit_model/dados/
+Models/xgboost/teste_acelerar_randomforest/mapas/
+
+# pesos e rasters, onde quer que apareçam
+*.pth
+*.pt
+*.ubj
+*.onnx
+*.tif
+*.tiff
+*.vrt
+*.npz
+*.npy
+*.gpkg
+*.shp
+
+# ambientes e caches locais
+.venv/
+Data/.venv/
+__pycache__/
+*.py[cod]
+.git/
+*.log
+*.bak

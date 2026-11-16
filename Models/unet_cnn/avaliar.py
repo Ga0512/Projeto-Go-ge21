@@ -51,6 +51,18 @@ def metricas(rotulo, cm):
         iou = tp / (ref + prd - tp)
     oa = tp.sum() / max(1, cm.sum())
     miou = float(np.nanmean(iou)) if np.isfinite(iou).any() else float("nan")
+    # mIoU simples dá peso igual a toda classe, inclusive a que mal aparece: na
+    # Jataí a água é 0,15% dos pixels e pesa 1/3 do agregado. Não dá para
+    # excluí-la (ela EXISTE e o modelo erra 100% dela -- isso é defeito, não
+    # artefato), então somam-se duas leituras em vez de mexer na primeira:
+    #   miou_presentes  média só das classes com referência > 0 (classe de fato
+    #                   ausente deixa de contar; na Jataí não muda nada)
+    #   fwiou           IoU ponderado pela frequência -- resume sem esconder
+    pres = ref > 0
+    miou_pres = (float(np.nanmean(iou[pres]))
+                 if pres.any() and np.isfinite(iou[pres]).any() else float("nan"))
+    fw = ref / max(1, cm.sum())
+    fwiou = float(np.nansum(np.where(np.isfinite(iou), iou, 0.0) * fw))
     linhas = ["%s  OA=%.4f  mIoU=%.4f  (%d pixels)" % (rotulo, oa, miou, cm.sum()),
               "  %2s  %-26s  %7s  %7s  %7s  %7s  %6s"
               % ("cl", "nome", "recall", "precis", "F1", "IoU", "ref%")]
@@ -60,6 +72,7 @@ def metricas(rotulo, cm):
                          100 * ref[c] / max(1, cm.sum())))
     print("\n".join(linhas), flush=True)
     return {"rotulo": rotulo, "oa": float(oa), "miou": miou,
+            "miou_presentes": miou_pres, "fwiou": fwiou,
             "acuracia": _lista(recall), "precisao": _lista(prec),
             "f1": _lista(f1), "iou": _lista(iou),
             "matriz_confusao": cm.tolist(), "n_pixels": int(cm.sum())}

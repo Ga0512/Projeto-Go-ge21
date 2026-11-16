@@ -1,0 +1,6 @@
+# Scripts que rodam DENTRO do container Linux precisam de LF. Sem isto, o Git
+# os entrega com CRLF no Windows e o shebang vira "#!/bin/sh\r" -> o container
+# falha com "bad interpreter". Já quebrou aqui antes de ser pego.
+*.sh text eol=lf
+Dockerfile text eol=lf
+.dockerignore text eol=lf
