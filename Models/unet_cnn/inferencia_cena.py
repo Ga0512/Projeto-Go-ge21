@@ -19,9 +19,10 @@ em vez de recalcular, o que no XGBoost derrubou a cena de colinas de 2 h para
 28 min (o recalculo na CPU era 74% do tempo). Só servem se tiverem sido geradas
 com as estatisticas DESTE dataset -- ver gerar_features_cena.py --receita.
 
-Predição: janelas de 256 px com passo `--passo`, ponderadas com peso maior no
-centro (a borda do patch é onde a rede erra), somando probabilidades antes do
-argmax. Com o padrão 128 cada pixel é previsto 4 vezes.
+Predição: janelas do tamanho do patch no receita.json, com passo `--passo`,
+ponderadas com peso maior no centro, somando probabilidades antes do argmax.
+Para o wv_jatai_v4 (patch 512), usar --passo 256 e --ndvi-temporal com o
+GeoTIFF original das quatro bandas de NDVI.
 
 Saída em runs/<nome>/cena_<cena>/: faixa_<y>.tif, progresso.txt (retomada),
 classes.tif (união por VRT) e info.json.
@@ -88,6 +89,64 @@ def bandas(pan, valido, st, janela, niveis):
     z = lambda a, k: (a - st["media"][k]) / st["desvio"][k]  # noqa: E731
     rug = (z(std, "std") + z(grad, "grad")) / 2
     return np.stack([z(pan, "pan"), z(ent, "glcm"), z(rug, "rugosidade")]).astype(np.float32)
+
+
+def ler_extra(src, proj, gt, x0, y0, w, h):
+    """Banda auxiliar reprojetada na grade EXATA da janela pedida.
+
+    O --banda-extra do vit_model/inferencia_cena.py exige mesma grade; aqui nao
+    da: o WorldView de Jatai e EPSG:4674 (graus) e o NDVI e EPSG:32722
+    (metros). Materializar o NDVI na grade do WV seriam ~320 GB em Float32,
+    entao reprojeta-se por janela, virtualmente -- o gdal.Warp num VRT so
+    calcula o pedaco lido.
+
+    Fora da cobertura sai 0, que e o mesmo que o gerador do dataset grava onde
+    nao ha NDVI: o modelo ja viu esse valor no treino.
+    """
+    bnd = (gt[0] + x0 * gt[1], gt[3] + (y0 + h) * gt[5],
+           gt[0] + (x0 + w) * gt[1], gt[3] + y0 * gt[5])
+    d = gdal.Warp("", src, format="VRT", dstSRS=proj, outputBounds=bnd,
+                  width=w, height=h, resampleAlg="bilinear",
+                  srcNodata=0, dstNodata=0, outputType=gdal.GDT_Float32)
+    a = d.GetRasterBand(1).ReadAsArray().astype(np.float32)
+    d = None
+    return a
+
+
+def preparar_ndvi_temporal(caminho):
+    """Abre as quatro bandas e repete o z-score usado no wv_jatai_v4."""
+    src = gdal.Open(caminho)
+    if src is None or src.RasterCount != 4:
+        raise SystemExit("--ndvi-temporal precisa de GeoTIFF com quatro bandas")
+    vrts, estatisticas = [], []
+    for k in range(4):
+        cru = src.GetRasterBand(k + 1).ReadAsArray().astype(np.float32)
+        valido = cru != 0
+        if not valido.any():
+            raise SystemExit("NDVI temporal: banda %d sem cobertura" % (k + 1))
+        valores = (cru[valido] / 10000.0 if k == 3 else
+                   (cru[valido] - 10000.0) / 10000.0)
+        estatisticas.append((float(valores.mean()), float(valores.std())))
+        vrts.append(gdal.Translate("", src, format="VRT", bandList=[k + 1],
+                                   noData=0))
+        del cru, valido, valores
+    return src, vrts, estatisticas
+
+
+def ler_ndvi_temporal(vrts, estatisticas, proj, gt, x0, y0, w, h):
+    """Reprojeta e padroniza as quatro bandas como no gerador wv_jatai_v4."""
+    extras = []
+    for k, vrt in enumerate(vrts):
+        cru = ler_extra(vrt, proj, gt, x0, y0, w, h)
+        valido = cru != 0
+        z = np.zeros((h, w), np.float32)
+        if valido.any():
+            valores = (cru[valido] / 10000.0 if k == 3 else
+                       (cru[valido] - 10000.0) / 10000.0)
+            media, desvio = estatisticas[k]
+            z[valido] = (valores - media) / max(desvio, 1e-9)
+        extras.append(z)
+    return np.stack(extras)
 
 
 # ---------------------------------------------------------------- predição
@@ -232,11 +291,21 @@ def main():
                          "<pan>_glcm_v18.tif e <pan>_rugosidade_v18.tif em vez de recalcular. "
                          "ATENCAO: so servem se geradas com as estatisticas DESTE dataset; "
                          "as de outra versao parecem certas e nao sao")
+    ap.add_argument("--banda-extra", default=None, metavar="RASTER",
+                    help="raster de uma banda acrescentado como ultima entrada "
+                         "(ex.: NDVI). Reprojetado por janela, entao pode estar "
+                         "noutro CRS e noutra resolucao que a PAN. Use quando o "
+                         "modelo foi treinado com mais bandas que as 3 do "
+                         "pipeline padrao.")
+    ap.add_argument("--ndvi-temporal", default=None, metavar="RASTER",
+                    help="GeoTIFF original de quatro bandas (median/min/max/stdDev) "
+                         "do wv_jatai_v4; aplica o mesmo z-score do gerador")
     ap.add_argument("--saida", default=None, help="pasta de saida")
     ap.add_argument("--faixa", type=int, default=1024, help="linhas por faixa")
     ap.add_argument("--overlap", type=int, default=300,
                     help="px extras em cada lado da faixa (texturas + janelas)")
-    ap.add_argument("--passo", type=int, default=128, help="px entre janelas de 256")
+    ap.add_argument("--passo", type=int, default=128,
+                    help="px entre janelas; para patch 512, use 256")
     ap.add_argument("--ladrilho", type=int, default=0,
                     help="lado do ladrilho 2D em px (0 = faixas de largura inteira). "
                          "Obrigatorio em cenas muito largas: uma faixa de 768 linhas numa "
@@ -250,9 +319,15 @@ def main():
     ap.add_argument("--lote", type=int, default=16, help="janelas por lote na GPU")
     ap.add_argument("--ate", type=int, default=0,
                     help="processa so ate esta linha (0 = cena inteira)")
+    ap.add_argument("--ate-col", type=int, default=0,
+                    help="limita as colunas em --ladrilho para teste parcial")
     ap.add_argument("--unir", action="store_true",
                     help="so junta as faixas ja existentes em classes.tif (nao infere)")
     args = ap.parse_args()
+    if args.banda_extra and args.ndvi_temporal:
+        ap.error("use --banda-extra ou --ndvi-temporal, nao ambos")
+    if args.ate_col and not args.ladrilho:
+        ap.error("--ate-col exige --ladrilho")
     t_inicio = time.monotonic()
 
     run = os.path.dirname(os.path.abspath(args.modelo))
@@ -270,6 +345,21 @@ def main():
 
     dev = ambiente.exigir_gpu()
     modelo, ck, arq, base = carregar_modelo(args.modelo, dev, N)
+    extra_src = None
+    if args.banda_extra:
+        if not os.path.exists(args.banda_extra):
+            raise SystemExit("--banda-extra: nao achei %s" % args.banda_extra)
+        extra_src = gdal.Open(args.banda_extra)
+        print("[banda-extra] %s (%dx%d)"
+              % (args.banda_extra, extra_src.RasterXSize, extra_src.RasterYSize),
+              flush=True)
+    ndvi_src = ndvi_vrts = ndvi_est = None
+    if args.ndvi_temporal:
+        if not os.path.exists(args.ndvi_temporal):
+            raise SystemExit("--ndvi-temporal: nao achei %s" % args.ndvi_temporal)
+        ndvi_src, ndvi_vrts, ndvi_est = preparar_ndvi_temporal(args.ndvi_temporal)
+        print("[ndvi-temporal] quatro bandas | media/desvio: %s"
+              % ", ".join("%.4f/%.4f" % est for est in ndvi_est), flush=True)
     margem_peso = ck_args.get("margem", 15)
     print("[modelo] %s | %s base=%d | epoca %s (val mIoU=%.4f) | passo %d"
           % (nome_run, arq, base, ck.get("epoca", "?"),
@@ -277,6 +367,16 @@ def main():
 
     receita = json.load(open(os.path.join(dataset, "receita.json"), encoding="utf-8"))
     par = receita["parametros"]
+    global P
+    P = int(par["patch"])
+    if not (0 < args.passo <= P):
+        raise SystemExit("--passo precisa estar entre 1 e %d" % P)
+    canais_esperados = next(v for k, v in ck["state_dict"].items()
+                             if k.endswith("weight") and v.ndim == 4).shape[1]
+    canais_entrada = 3 + int(extra_src is not None) + (4 if ndvi_vrts else 0)
+    if canais_entrada != canais_esperados:
+        raise SystemExit("modelo espera %d bandas; entrada montaria %d"
+                         % (canais_esperados, canais_entrada))
     ds = gdal.Open(args.imagem)
     W, H = ds.RasterXSize, ds.RasterYSize
     gt, proj = ds.GetGeoTransform(), ds.GetProjection()
@@ -332,6 +432,7 @@ def main():
         print("[retomada] %d faixas ja feitas" % len(feitas), flush=True)
 
     H_alvo = min(H, args.ate) if args.ate else H
+    W_alvo = min(W, args.ate_col) if args.ate_col else W
     n_faixas, t_pred, px_feitos = 0, 0.0, 0
 
     def ler(banda_, x0, y0, w, h):
@@ -339,7 +440,7 @@ def main():
 
     if args.ladrilho:
         L, OV = args.ladrilho, args.overlap
-        xs = list(range(0, W, L))
+        xs = list(range(0, W_alvo, L))
         ys = list(range(0, H_alvo, L))
         total = len(xs) * len(ys)
         print("[ladrilhos] %d x %d = %d de %d px (+%d de margem)"
@@ -349,7 +450,7 @@ def main():
                 chave = y0 * 10 ** 7 + x0
                 if chave in feitas:
                     continue
-                x1, y1 = min(W, x0 + L), min(H, y0 + L)
+                x1, y1 = min(W_alvo, x0 + L), min(H_alvo, y0 + L)
                 xa, xb = max(0, x0 - OV), min(W, x1 + OV)
                 ya, yb = max(0, y0 - OV), min(H, y1 + OV)
                 pan = ler(banda, xa, ya, xb - xa, yb - ya).astype(np.float32)
@@ -372,6 +473,14 @@ def main():
                     X = np.stack([zp] + [bb.ReadAsArray(xa, ya, xb - xa, yb - ya)
                                          .astype(np.float32) * sc + off
                                          for bb, (off, sc) in zip(tex, tex_oe)])
+                if extra_src is not None:
+                    X = np.concatenate(
+                        [X, ler_extra(extra_src, proj, gt, xa, ya,
+                                      xb - xa, yb - ya)[None]], 0)
+                if ndvi_vrts is not None:
+                    X = np.concatenate(
+                        [X, ler_ndvi_temporal(ndvi_vrts, ndvi_est, proj, gt,
+                                              xa, ya, xb - xa, yb - ya)], 0)
                 X[:, ~valido] = 0
                 t = time.monotonic()
                 probs, _ = prever(modelo, X, args.passo, args.lote, dev, margem_peso)
@@ -421,6 +530,13 @@ def main():
             zp = (pan - st["media"]["pan"]) / st["desvio"]["pan"]
             X = np.stack([zp] + [b.ReadAsArray(0, ya, W, yb - ya).astype(np.float32) * sc + off
                                  for b, (off, sc) in zip(tex, tex_oe)])
+        if extra_src is not None:
+            X = np.concatenate(
+                [X, ler_extra(extra_src, proj, gt, 0, ya, W, yb - ya)[None]], 0)
+        if ndvi_vrts is not None:
+            X = np.concatenate(
+                [X, ler_ndvi_temporal(ndvi_vrts, ndvi_est, proj, gt,
+                                      0, ya, W, yb - ya)], 0)
         X[:, ~valido] = 0
         t = time.monotonic()
         probs, _ = prever(modelo, X, args.passo, args.lote, dev, margem_peso,
