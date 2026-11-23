@@ -246,15 +246,27 @@ def gravar_faixa(caminho, codigos, y0, gt, proj, W):
     ds = None
 
 
-def unir_faixas(cls_caminho, pasta):
+def unir_faixas(cls_caminho, pasta, grade=None):
     faixas = sorted(f for f in os.listdir(pasta)
                     if (f.startswith("faixa_") or f.startswith("bloco_"))
                     and f.endswith(".tif"))
     if not faixas:
         return None
     vrt = os.path.join(pasta, "faixas.vrt")
-    gdal.BuildVRT(vrt, [os.path.join(pasta, f) for f in faixas],
-                  options=gdal.BuildVRTOptions(resolution="highest"))
+    if grade is None:
+        opcoes = gdal.BuildVRTOptions(resolution="highest")
+    else:
+        gt, largura, altura = grade
+        limites = (gt[0], gt[3] + altura * gt[5],
+                   gt[0] + largura * gt[1], gt[3])
+        opcoes = gdal.BuildVRTOptions(resolution="user", outputBounds=limites,
+                                      xRes=gt[1], yRes=abs(gt[5]))
+    uniao = gdal.BuildVRT(vrt, [os.path.join(pasta, f) for f in faixas],
+                          options=opcoes)
+    if grade is not None and (uniao.RasterXSize, uniao.RasterYSize) != (largura, altura):
+        raise RuntimeError("VRT com grade %dx%d, esperada %dx%d" %
+                           (uniao.RasterXSize, uniao.RasterYSize, largura, altura))
+    uniao = None
     gdal.Translate(cls_caminho, vrt, options=gdal.TranslateOptions(
         creationOptions=["COMPRESS=DEFLATE", "PREDICTOR=2", "TILED=YES",
                          "BIGTIFF=IF_SAFER"]))
@@ -422,7 +434,7 @@ def main():
     prog = os.path.join(saida, "progresso.txt")
 
     if args.unir:
-        n = unir_faixas(cls_caminho, saida)
+        n = unir_faixas(cls_caminho, saida, (gt, W, H))
         print("unidas %s faixas -> %s" % (n, cls_caminho))
         return
 
@@ -500,7 +512,23 @@ def main():
                 gc.collect()
                 torch.cuda.empty_cache()
         ds = banda = None
-        n_unidas = unir_faixas(cls_caminho, saida)
+        n_unidas = unir_faixas(cls_caminho, saida, (gt, W_alvo, H_alvo))
+        if n_unidas is None:
+            raise RuntimeError("nenhum ladrilho com imagem para unir")
+        with open(os.path.join(saida, "info.json"), "w", encoding="utf-8") as f:
+            json.dump({"run": nome_run, "modelo": os.path.abspath(args.modelo),
+                       "arquitetura": arq, "base": base, "epoca": ck.get("epoca"),
+                       "val_miou": ck.get("val_miou"),
+                       "imagem": os.path.abspath(args.imagem), "cena": nome_cena,
+                       "dataset": dataset, "passo": args.passo,
+                       "ladrilho": args.ladrilho, "margem_peso": margem_peso,
+                       "texturas": args.texturas, "ndvi_temporal": args.ndvi_temporal,
+                       "classes": dados.CLASS_NOMES, "repr_codigo": dados.REPR_CODIGO,
+                       "estatisticas": st, "blocos": n_unidas,
+                       "px_classificados_nesta_execucao": px_feitos,
+                       "tempo_predicao_s": round(t_pred, 1),
+                       "tempo_total_s": round(time.monotonic() - t_inicio, 1)},
+                      f, indent=2, ensure_ascii=False)
         print("\n-> %s (%s blocos, %d px, %.0f kpx/s)"
               % (cls_caminho, n_unidas, px_feitos, px_feitos / max(t_pred, 1e-9) / 1e3),
               flush=True)
@@ -557,7 +585,7 @@ def main():
         torch.cuda.empty_cache()
     ds = banda = None
 
-    n_unidas = unir_faixas(cls_caminho, saida)
+    n_unidas = unir_faixas(cls_caminho, saida, (gt, W, H_alvo))
     if n_unidas is None:
         print("nenhuma faixa_*.tif para unir")
         return
