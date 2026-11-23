@@ -56,7 +56,13 @@ def _classes(dataset, juntar_agua=False):
     return (cfg.CLASS_MAP, cfg.CLASS_NOMES, cfg.N_CLASSES, cfg.REPR_CODIGO)
 
 
-CLASS_MAP, CLASS_NOMES, N_CLASSES, REPR_CODIGO = _classes(DATASET_PADRAO)
+if os.path.isfile(os.path.join(DATASET_PADRAO, "manifest.csv")):
+    CLASS_MAP, CLASS_NOMES, N_CLASSES, REPR_CODIGO = _classes(DATASET_PADRAO)
+else:
+    # No Pod, so o dataset pedido por --dataset e enviado; o padrao antigo
+    # pode nao existir. configurar() seleciona as classes do dataset real.
+    CLASS_MAP, CLASS_NOMES, N_CLASSES, REPR_CODIGO = (
+        cfg.CLASS_MAP, cfg.CLASS_NOMES, cfg.N_CLASSES, cfg.REPR_CODIGO)
 IGNORE = cfg.IGNORE
 
 # cores oficiais da legenda MapBiomas (LEGEND em Data/scripts/*) dos REPR_CODIGO
