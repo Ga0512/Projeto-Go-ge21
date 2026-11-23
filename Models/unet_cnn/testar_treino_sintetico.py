@@ -35,8 +35,8 @@ def main():
     with open(os.path.join(pasta, "manifest.csv"), "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(("arquivo", "cena", "split", "frac_veg", "frac_nao_veg", "frac_agua"))
-        for i in range(24):
-            split = "treino" if i < 20 else ("validacao" if i < 22 else "teste")
+        for i in range(28):
+            split = "treino" if i < 24 else ("validacao" if i < 26 else "teste")
             nome = "sintetico_%03d" % i
             splits[split].append(nome)
             imagem = driver.Create(os.path.join(pasta, "images", nome + ".tif"),
@@ -62,7 +62,7 @@ def main():
     with open(os.path.join(pasta, "receita.json"), "w", encoding="utf-8") as f:
         json.dump({"bandas": ["b%d" % i for i in range(1, 8)],
                    "parametros": {"resolucao": 2.5}}, f)
-    print("Dataset sintético criado:", pasta, "20/2/2 patches, 7 bandas, 3 classes")
+    print("Dataset sintético criado:", pasta, "24/2/2 patches, 7 bandas, 3 classes")
 
 
 if __name__ == "__main__":
