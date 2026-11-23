@@ -13,6 +13,7 @@ a fonte única de CLASS_MAP do projeto.
 
 import csv
 import json
+import io
 import os
 import sys
 
@@ -102,12 +103,23 @@ def _ler_tif(caminho):
     return arr
 
 
-def carregar(dataset, nomes):
-    """-> imgs (N,C,H,W) float32, rotulos (N,H,W) uint8 em índices de classe
-    (IGNORE = sem rótulo, código fora do CLASS_MAP ou pixel não finito)."""
-    imgs, rotulos = [], []
+def carregar(dataset, nomes, dtype=np.float32):
+    """-> imgs (N,C,H,W) no dtype pedido, rotulos (N,H,W) uint8 em índices de
+    classe (IGNORE = sem rótulo, código fora do CLASS_MAP ou não finito).
+
+    Aloca o array final de uma vez e preenche no lugar. O np.stack() anterior
+    segurava a lista E a cópia empilhada ao mesmo tempo, dobrando o pico de
+    RAM: com os patches de 512 px e 4 bandas do wv_jatai_v3 isso pedia 16,8 GB
+    e o treino morria sem deixar log (WSL com teto de 11 GB numa máquina de
+    15,4 GB).
+
+    `dtype`: os train*.py mandam o X para a GPU em float16 logo em seguida,
+    entao passar np.float16 aqui nao perde nenhum valor e corta o pico pela
+    metade. O `brutos` que sobra para a visualizacao fica igualmente menor.
+    """
+    imgs, rotulos = None, None
     fora_do_mapa = {}
-    for nome in nomes:
+    for i, nome in enumerate(nomes):
         im = _ler_tif(os.path.join(dataset, "images", nome + ".tif")).astype(np.float32)
         mk = _ler_tif(os.path.join(dataset, "masks", nome + ".tif"))
         if im.ndim != 3 or im.shape[1:] != mk.shape:
@@ -122,8 +134,59 @@ def carregar(dataset, nomes):
         if invalido.any():
             im[:, invalido] = 0
             y[invalido] = IGNORE
-        imgs.append(im)
-        rotulos.append(y)
+        if imgs is None:
+            imgs = np.empty((len(nomes),) + im.shape, dtype)
+            rotulos = np.empty((len(nomes),) + y.shape, y.dtype)
+        imgs[i] = im
+        rotulos[i] = y
     if fora_do_mapa:
         print("[dados] AVISO: códigos fora do CLASS_MAP (ignorados): %s" % fora_do_mapa)
-    return np.stack(imgs), np.stack(rotulos)
+    if imgs is None:
+        raise ValueError("split vazio: nenhum patch para carregar")
+    return imgs, rotulos
+
+
+def carregar_cache(dataset, split, nomes, dtype=np.float32, usar=True):
+    '''carregar() com cache em .npy, lido por mmap.
+
+    POR QUE. Abrir 2.000 GeoTIFF comprimidos um a um leva 14 min no
+    wv_jatai_v3 -- mais que uma epoca inteira -- e o custo se repete a cada
+    execucao. Calibrar --lote exige varias execucoes, entao isso passa a
+    dominar o tempo de trabalho. Com o cache, da segunda vez em diante sai em
+    segundos.
+
+    A chave guarda a lista de nomes e o dtype: mudou o split, o dataset ou a
+    precisao, o cache e refeito. Nada e escrito fora de <dataset>/cache/, e
+    apagar essa pasta so custa uma releitura.
+
+    mmap_mode='r' devolve array read-only paginado sob demanda pelo SO. O
+    torch.from_numpy avisa que nao e gravavel; e inofensivo aqui porque o
+    treino so le (o indexamento por lote ja devolve copia).
+    '''
+    base = os.path.join(dataset, "cache")
+    nome_dt = np.dtype(dtype).name
+    cx = os.path.join(base, "%s_x_%s.npy" % (split, nome_dt))
+    cy = os.path.join(base, "%s_y.npy" % split)
+    ck = os.path.join(base, "%s_%s.chave" % (split, nome_dt))
+    nl = chr(10)
+    chave = str(len(nomes)) + nl + nl.join(nomes)
+    if usar and os.path.exists(cx) and os.path.exists(cy) and os.path.exists(ck):
+        try:
+            if io.open(ck, encoding="utf-8").read() == chave:
+                print("[cache] %s lido de %s" % (split, base), flush=True)
+                return (np.load(cx, mmap_mode="r"), np.load(cy, mmap_mode="r"))
+            print("[cache] %s: lista de patches mudou, refazendo" % split)
+        except Exception as e:
+            print("[cache] %s: ilegivel (%s), refazendo" % (split, e))
+    x, y = carregar(dataset, nomes, dtype)
+    if usar:
+        try:
+            os.makedirs(base, exist_ok=True)
+            np.save(cx, x)
+            np.save(cy, y)
+            io.open(ck, "w", encoding="utf-8").write(chave)
+            print("[cache] %s gravado (%.2f GB)"
+                  % (split, (x.nbytes + y.nbytes) / 2**30), flush=True)
+        except Exception as e:
+            print("[cache] %s: nao gravou (%s); seguindo sem cache" % (split, e))
+    return x, y

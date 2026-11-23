@@ -21,6 +21,7 @@ Uso (no WSL, a partir de Models/):
 import argparse
 import copy
 import csv
+import io
 import json
 import math
 import os
@@ -39,6 +40,8 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 N = dados.N_CLASSES
 IGN = dados.IGNORE
 PESO = None          # peso por classe na CE (--peso-classe); None = sem peso
+BORDA_RAIO = 0       # --borda-raio: faixa (px) ao redor da fronteira entre classes
+BORDA_ALFA = 0.0     # --borda-alfa: peso extra da CE nessa faixa
 
 
 def c_livre_gb():
@@ -46,9 +49,32 @@ def c_livre_gb():
     return shutil.disk_usage("/mnt/c").free / 1e9 if os.path.isdir("/mnt/c") else float("inf")
 
 
-def aumentar(x, y, rng, ganho_pan, offset_pan):
+def aumentar(x, y, rng, ganho_pan, offset_pan, escala=0.0, cutout=0,
+             cutout_frac=0.25):
     """Uma das 8 combinações de rot90/flip (imagem e máscara juntas) + PAN
-    com ganho/deslocamento aleatórios (as texturas não mudam com brilho)."""
+    com ganho/deslocamento aleatórios (as texturas não mudam com brilho).
+
+    `escala` e `cutout` sao opcionais e saem DESLIGADOS, para nao mudar o
+    significado dos runs antigos. Existem porque o limite medido no
+    wv_jatai_v3 e falta de PAISAGEM, nao de otimizacao: sao 5 blocos de treino,
+    a rede chega ao teto na epoca 2 e dali em diante a loss de treino cai
+    enquanto a validacao piora. Sem rotular mais blocos, a saida e simular
+    variedade.
+
+    escala > 0: recorta 1/s do patch (s em [1, 1+escala]) e reamostra de volta
+        ao tamanho original -- a rede passa a ver talhao e copa em tamanhos
+        diferentes. Uma escala por LOTE, nao por amostra, para gastar uma
+        interpolacao so; com 350 passos por epoca a variedade vem do numero de
+        passos. Mascara por vizinho mais proximo, senao surgem classes que nao
+        existem.
+
+    cutout > 0: apaga N retangulos por patch, preenchendo com ruido N(0,1) e
+        PRESERVANDO o rotulo -- forca a decidir pelo contexto em vez de decorar
+        a mancha. O preenchimento e ruido, e nao zero, porque neste pipeline
+        zero ja significa "pixel invalido" (dados.carregar zera a imagem e
+        marca IGNORE); as bandas sao z-score, entao ruido N(0,1) e indistinto
+        de textura comum e nao ensina a confundir as duas coisas.
+    """
     B = len(x)
     rot, flip = rng.integers(0, 4, B), rng.integers(0, 2, B)
     xs, ys = [], []
@@ -61,10 +87,34 @@ def aumentar(x, y, rng, ganho_pan, offset_pan):
         xs.append(a)
         ys.append(b)
     x, y = torch.stack(xs).float(), torch.stack(ys).long()
+
+    H, W = x.shape[-2:]
+    if escala > 0:
+        s = float(rng.uniform(1.0, 1.0 + escala))
+        h, w = max(16, int(round(H / s))), max(16, int(round(W / s)))
+        if h < H or w < W:
+            oy = int(rng.integers(0, H - h + 1))
+            ox = int(rng.integers(0, W - w + 1))
+            x = F.interpolate(x[:, :, oy:oy + h, ox:ox + w], size=(H, W),
+                              mode="bilinear", align_corners=False)
+            y = F.interpolate(y[:, None, oy:oy + h, ox:ox + w].float(),
+                              size=(H, W), mode="nearest")[:, 0].long()
+
     if ganho_pan or offset_pan:
         g = torch.from_numpy(rng.uniform(1 - ganho_pan, 1 + ganho_pan, B)).to(x)
         o = torch.from_numpy(rng.uniform(-offset_pan, offset_pan, B)).to(x)
         x[:, 0] = x[:, 0] * g[:, None, None] + o[:, None, None]
+
+    if cutout > 0 and cutout_frac > 0:
+        lado = max(8, int(round(min(H, W) * cutout_frac)))
+        for i in range(B):
+            for _ in range(int(cutout)):
+                ch = int(rng.integers(8, lado + 1))
+                cw = int(rng.integers(8, lado + 1))
+                oy = int(rng.integers(0, H - ch + 1))
+                ox = int(rng.integers(0, W - cw + 1))
+                x[i, :, oy:oy + ch, ox:ox + cw] = torch.randn(
+                    x.shape[1], ch, cw, device=x.device, dtype=x.dtype)
     return x, y
 
 
@@ -192,6 +242,32 @@ def relatar_reamostragem(pesos, frac, cenas, n_classes, k, alvo=None):
           % (pesos.max() * n, 100 * ef, n), flush=True)
 
 
+def faixa_fronteira(y, raio):
+    """bool (B,H,W): pixels a <= `raio` da fronteira entre classes do ROTULO.
+
+    Mede-se a fronteira no rotulo, nao na predicao, para a faixa nao mudar
+    conforme o modelo aprende -- senao o peso (e a metrica) viram alvo movel.
+
+    A dilatacao e um max_pool: distancia de Chebyshev, nao euclidiana. Para
+    este uso tanto faz (a diferenca e o canto do quadrado contra o circulo) e
+    sai numa chamada de GPU, em vez de uma transformada de distancia por
+    amostra na CPU.
+    """
+    v = y != IGN
+    yy = torch.where(v, y, torch.full_like(y, -1))
+    b = torch.zeros_like(v)
+    dif = (yy[:, :, 1:] != yy[:, :, :-1]) & v[:, :, 1:] & v[:, :, :-1]
+    b[:, :, 1:] |= dif
+    b[:, :, :-1] |= dif
+    dif = (yy[:, 1:, :] != yy[:, :-1, :]) & v[:, 1:, :] & v[:, :-1, :]
+    b[:, 1:, :] |= dif
+    b[:, :-1, :] |= dif
+    if raio <= 0:
+        return b
+    d = F.max_pool2d(b.float()[:, None], 2 * raio + 1, stride=1, padding=raio)
+    return d[:, 0] > 0
+
+
 def perda(logits, y):
     """Cross-entropy (ignora sem rótulo) + Dice suave médio das classes.
 
@@ -203,7 +279,20 @@ def perda(logits, y):
     decisão por pixel é a CE; é nela que o peso tem efeito.
     """
     logits = logits.float()
-    ce = F.cross_entropy(logits, y, weight=PESO, ignore_index=IGN)
+    if BORDA_ALFA > 0:
+        # Olhando os recortes ampliados: o erro nao e imprecisao do traco, e
+        # VEGETACAO ESPARSA (cerrado ralo) na transicao entre dossel fechado e
+        # campo aberto -- uma faixa de ~30 m que o modelo chama de nao
+        # vegetacao inteira. Ela e 5,7% dos pixels e carrega quase todo o erro
+        # (acerto 50% junto a fronteira contra 98,8% no interior), entao sem
+        # peso o gradiente e dominado por pixel que o modelo ja acerta.
+        pp = F.cross_entropy(logits, y, weight=PESO, ignore_index=IGN,
+                             reduction="none")
+        w = 1.0 + BORDA_ALFA * faixa_fronteira(y, BORDA_RAIO).float()
+        w = w * (y != IGN).float()
+        ce = (pp * w).sum() / w.sum().clamp_min(1.0)
+    else:
+        ce = F.cross_entropy(logits, y, weight=PESO, ignore_index=IGN)
     valido = (y != IGN)[:, None]
     p = logits.softmax(1) * valido
     t = F.one_hot(torch.where(y == IGN, 0, y), N).permute(0, 3, 1, 2) * valido
@@ -221,14 +310,28 @@ def prever(modelo, X, lote=32):
     DEPOIS de o treino em si ter rodado liso com --lote 2 (3085 de 6144 MiB).
     Quem chama agora passa o lote explicitamente, derivado de --lote."""
     modelo.eval()
+    d = next(modelo.parameters()).device
     out = []
     for i in range(0, len(X), lote):
+        xb = X[i:i + lote]
+        if xb.device != d:
+            xb = xb.to(d)
         with torch.autocast("cuda", dtype=torch.bfloat16):
-            out.append(modelo(X[i:i + lote].float()).argmax(1).to(torch.uint8))
+            out.append(modelo(xb.float()).argmax(1).to(torch.uint8))
     return torch.cat(out)
 
 
+def _ix(t, idx):
+    """t[idx] com o indice no device de t -- com --dados-na-ram os splits ficam
+    na RAM e `pred` na GPU, entao um indice so nao serve para os dois."""
+    return t[idx.to(t.device)]
+
+
 def matriz(pred, y, mascara=None):
+    if y.device != pred.device:
+        y = y.to(pred.device)
+    if mascara is not None and mascara.device != pred.device:
+        mascara = mascara.to(pred.device)
     v = y != IGN
     if mascara is not None:
         v &= mascara
@@ -335,6 +438,12 @@ def visualizar(imgs, rotulos, preds, nomes, cenas, margem, caminho, n, titulo):
     plt.close(fig)
 
 
+def _hms(seg):
+    """segundos -> '7m12s', para o tempo restante do epoch."""
+    seg = int(max(seg, 0))
+    return "%dm%02ds" % (seg // 60, seg % 60) if seg >= 60 else "%ds" % seg
+
+
 def main():
     global N, IGN, PESO                         # N/IGN/PESO usados por perda()/matriz()
     ap = argparse.ArgumentParser(description=__doc__,
@@ -368,6 +477,40 @@ def main():
                          "pico de 3,4x no sorteio; k=8 chega a 47,6%% com 6,0x; "
                          "k=20 a 66,9%% com 9,2x e amostra efetiva de 29%%. "
                          "0 desliga -- ver pesos_reamostragem()")
+    ap.add_argument("--borda-raio", type=int, default=0, metavar="R",
+                    help="faixa de R px ao redor da fronteira entre classes. "
+                         "Com --borda-alfa, a CE pesa (1+alfa) ali. 16 px = "
+                         "~8 m a 0,486 m, que cobre a transicao medida.")
+    ap.add_argument("--borda-alfa", type=float, default=0.0, metavar="A",
+                    help="peso extra da CE na faixa de fronteira. 0 desliga "
+                         "(padrao). 3 a 5 e um ponto de partida; alto demais "
+                         "ensina a rede a copiar a imprecisao do rotulo.")
+    ap.add_argument("--escala-jitter", type=float, default=0.0, metavar="S",
+                    help="recorta 1/s do patch (s em [1,1+S]) e reamostra de "
+                         "volta: a rede ve as feicoes em tamanhos variados. "
+                         "0 desliga (padrao, para nao mexer nos runs antigos). "
+                         "0.3 e um ponto de partida razoavel.")
+    ap.add_argument("--cutout", type=int, default=0, metavar="N",
+                    help="apaga N retangulos por patch (ruido N(0,1), rotulo "
+                         "preservado), forcando decisao por contexto. 0 desliga.")
+    ap.add_argument("--cutout-frac", type=float, default=0.25, metavar="F",
+                    help="lado maximo de cada retangulo do --cutout, como "
+                         "fracao do patch.")
+    ap.add_argument("--dados-na-ram", action="store_true",
+                    help="mantem os splits na RAM e manda so o lote para a GPU. "
+                         "O padrao e deixar os tres splits residentes na VRAM, "
+                         "o que custa 4,7 GB com patch 512 e 4 bandas -- numa "
+                         "placa de 6 GB sobra o bastante so para --lote 2, e "
+                         "ainda assim o treino arrasta por reciclagem de blocos. "
+                         "Com esta opcao a VRAM fica para as ativacoes e da para "
+                         "subir o --lote, que costuma sair mais rapido apesar da "
+                         "transferencia por passo (~33 MB com lote 16). Nao custa "
+                         "RAM extra: torch.from_numpy compartilha o buffer.")
+    ap.add_argument("--log-cada", type=int, default=50, metavar="N",
+                    help="imprime vazao e VRAM a cada N passos (0 desliga). "
+                         "Sem isto o unico sinal de vida e a linha de fim de "
+                         "epoca, que no WorldView leva mais de 20 min -- e nao "
+                         "ha como distinguir 'lento' de 'travado'.")
     ap.add_argument("--resume", action="store_true",
                     help="retomar de runs/<nome>/ultimo.pth (gravado a cada epoch): "
                          "continua do epoch seguinte, com otimizador, histórico e "
@@ -402,6 +545,7 @@ def main():
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
     torch.manual_seed(args.seed)
+    global PESO, BORDA_RAIO, BORDA_ALFA
     rng = np.random.default_rng(args.seed)
     saida = os.path.join(BASE, "runs", args.nome)
     os.makedirs(os.path.join(saida, "visualizacao"), exist_ok=True)
@@ -411,12 +555,50 @@ def main():
     nomes, brutos, cenas, X, Y = {}, {}, {}, {}, {}
     for s in ("treino", "validacao", "teste"):
         nomes[s] = dados.ler_split(args.dataset, s)
-        brutos[s] = dados.carregar(args.dataset, nomes[s])
+        brutos[s] = dados.carregar_cache(args.dataset, s, nomes[s], np.float16)
         cenas[s] = np.array([cena_de[n] for n in nomes[s]])
-        X[s] = torch.from_numpy(brutos[s][0]).to(dev, torch.float16)
-        Y[s] = torch.from_numpy(brutos[s][1]).to(dev)
+        if args.dados_na_ram:
+            X[s] = torch.from_numpy(brutos[s][0])          # compartilha o buffer
+            Y[s] = torch.from_numpy(brutos[s][1])
+        else:
+            X[s] = torch.from_numpy(brutos[s][0]).to(dev, torch.float16)
+            Y[s] = torch.from_numpy(brutos[s][1]).to(dev)
     print("[dados] treino=%d val=%d teste=%d | %.0fs"
           % (len(X["treino"]), len(X["validacao"]), len(X["teste"]), time.monotonic() - t0))
+
+    # Quanto da placa o dataset ocupa PARADO. O train.py mantem os tres splits
+    # residentes na VRAM; com patch 256 do SPOT5 isso e barato, mas no 512 do
+    # WorldView com 4 bandas sao 4,7 GB numa placa de 6 GB -- e o que sobra nao
+    # paga as ativacoes. Quando aperta, o PyTorch recicla blocos a cada passo e
+    # o treino fica 4x mais lento com a GPU marcando 100%. Sem esta linha isso
+    # so aparecia como lentidao inexplicada.
+    if dev.type == "cuda":
+        bytes_dados = sum(t.nelement() * t.element_size()
+                          for d in (X, Y) for t in d.values())
+        livre_v, total_v = torch.cuda.mem_get_info()
+        onde = "na VRAM" if X["treino"].is_cuda else "na RAM (fora da VRAM)"
+        print("[vram] dados %.2f GB %s | reservado na GPU %.2f | livre %.2f de %.2f GB"
+              % (bytes_dados / 2**30, onde, torch.cuda.memory_reserved() / 2**30,
+                 livre_v / 2**30, total_v / 2**30), flush=True)
+        if livre_v / 2**30 < 1.5:
+            print("[vram] AVISO: menos de 1,5 GB livres para ativacoes e gradientes. "
+                  "Espere lentidao por reciclagem de blocos. Baixe --lote, ou "
+                  "--base, ou use um dataset com menos patches.", flush=True)
+
+    BORDA_RAIO, BORDA_ALFA = args.borda_raio, args.borda_alfa
+    faixa_val = None
+    if args.borda_raio > 0:
+        # calculada UMA vez: a fronteira vem do rotulo, que nao muda.
+        faixa_val = torch.cat([faixa_fronteira(Y["validacao"][i:i + 32].to(dev),
+                                               args.borda_raio).cpu()
+                               for i in range(0, len(Y["validacao"]), 32)])
+        fr = float(faixa_val.float().mean())
+        res = float(json.load(io.open(os.path.join(args.dataset, "receita.json"),
+                                      encoding="utf-8"))["parametros"]["resolucao"])
+        print("[borda] faixa de %d px (%.1f m) = %.1f%% dos pixels de validacao"
+              " | peso da CE ali: %.1fx"
+              % (args.borda_raio, args.borda_raio * res, 100 * fr,
+                 1 + args.borda_alfa), flush=True)
 
     if args.peso_classe:
         if len(args.peso_classe) != N:
@@ -497,6 +679,7 @@ def main():
     # coluna por classe aqui, só o agregado sobrevive, e o agregado esconde
     # justamente a classe rara (ver o `por_cena` do RF e do XGBoost no v18).
     campos = (["epoca", "lr", "loss_treino", "val_oa", "val_miou"]
+              + (["val_oa_borda", "val_miou_borda"] if faixa_val is not None else [])
               + ["val_iou_%d" % c for c in range(N)]
               + ["tempo_s"])
     livre = c_livre_gb()
@@ -516,13 +699,22 @@ def main():
             perm = rng.choice(len(X["treino"]), size=len(X["treino"]),
                               replace=True, p=pesos)
         soma, n, t0 = 0.0, 0, time.monotonic()
+        t_bloco, soma_bloco, n_bloco = time.monotonic(), 0.0, 0
+        if dev.type == "cuda":
+            torch.cuda.reset_peak_memory_stats()
         for b in range(passos_ep):
             if b % 20 == 0 and c_livre_gb() < args.min_livre_c_gb:
                 raise SystemExit("[trava] C: com %.2f GB livres (< %.1f GB) na epoca %d: parando. "
                                  "O melhor modelo até aqui (epoca %d) está em modelo_melhor.pth."
                                  % (c_livre_gb(), args.min_livre_c_gb, ep + 1, melhor_ep))
-            idx = torch.from_numpy(perm[b * args.lote:(b + 1) * args.lote]).to(dev)
-            x, y = aumentar(X["treino"][idx], Y["treino"][idx], rng, args.ganho_pan, args.offset_pan)
+            idx = torch.from_numpy(perm[b * args.lote:(b + 1) * args.lote])
+            if X["treino"].is_cuda:
+                idx = idx.to(dev)
+            xb, yb = X["treino"][idx], Y["treino"][idx]
+            if xb.device != dev:                      # --dados-na-ram: so o lote sobe
+                xb, yb = xb.to(dev), yb.to(dev)
+            x, y = aumentar(xb, yb, rng, args.ganho_pan, args.offset_pan,
+                            args.escala_jitter, args.cutout, args.cutout_frac)
             lr = args.lr
             if total:
                 if ep * passos_ep + b < aquec:
@@ -540,10 +732,36 @@ def main():
             opt.step()
             soma += float(loss.detach()) * len(idx)
             n += len(idx)
+            soma_bloco += float(loss.detach()) * len(idx)
+            n_bloco += len(idx)
+            if args.log_cada and (b + 1) % args.log_cada == 0:
+                dt = time.monotonic() - t_bloco
+                vram = ""
+                if dev.type == "cuda":
+                    vram = " | VRAM %.2f/%.2f GB pico %.2f" % (
+                        torch.cuda.memory_allocated() / 2**30,
+                        torch.cuda.memory_reserved() / 2**30,
+                        torch.cuda.max_memory_allocated() / 2**30)
+                print("  passo %4d/%d | loss=%.4f | %.2f passos/s %.1f patches/s"
+                      " | faltam %s%s"
+                      % (b + 1, passos_ep, soma_bloco / max(n_bloco, 1),
+                         args.log_cada / max(dt, 1e-9),
+                         n_bloco / max(dt, 1e-9),
+                         _hms((passos_ep - b - 1) * dt / max(args.log_cada, 1)),
+                         vram), flush=True)
+                t_bloco, soma_bloco, n_bloco = time.monotonic(), 0.0, 0
 
-        m = metricas(matriz(prever(modelo, X["validacao"], lote_inf), Y["validacao"]))
+        pred_val = prever(modelo, X["validacao"], lote_inf)
+        m = metricas(matriz(pred_val, Y["validacao"]))
+        # mIoU SO na faixa de fronteira: e onde mora o erro, e no agregado ele
+        # some sob os 75% de interior que ja estao em 0,98.
+        mb = (metricas(matriz(pred_val, Y["validacao"], faixa_val))
+              if faixa_val is not None else None)
         reg = {"epoca": ep + 1, "lr": lr, "loss_treino": soma / n, "val_oa": m["oa"],
                "val_miou": m["miou"], "tempo_s": round(time.monotonic() - t0, 2)}
+        if mb is not None:
+            reg["val_miou_borda"] = mb["miou"]
+            reg["val_oa_borda"] = mb["oa"]
         reg.update(("val_iou_%d" % c, m["iou"][c]) for c in range(N))
         historico.append(reg)
         marca = ""
@@ -552,11 +770,13 @@ def main():
             estado = copy.deepcopy({k: v.cpu() for k, v in modelo.state_dict().items()})
             torch.save({"state_dict": estado, "epoca": ep + 1, "val_miou": melhor,
                         "args": vars(args)}, os.path.join(saida, "modelo_melhor.pth"))
-        print("epoca %3d | lr=%.2e | loss=%.4f | val OA=%.4f mIoU=%.4f | IoU %s | %.1fs%s"
+        extra = ("" if mb is None else
+                 " | BORDA OA=%.4f mIoU=%.4f" % (mb["oa"], mb["miou"]))
+        print("epoca %3d | lr=%.2e | loss=%.4f | val OA=%.4f mIoU=%.4f | IoU %s%s | %.1fs%s"
               % (ep + 1, lr, reg["loss_treino"], m["oa"], m["miou"],
                  " ".join("%s=%.3f" % (dados.CLASS_NOMES[c][:3], m["iou"][c])
                           for c in range(N)),
-                 reg["tempo_s"], marca),
+                 extra, reg["tempo_s"], marca),
               flush=True)
         with open(os.path.join(saida, "log.csv"), "w", newline="") as f:
             wr = csv.DictWriter(f, fieldnames=campos)
@@ -588,9 +808,10 @@ def main():
                          "%s | %s | geral" % (s.upper(), escopo) if imprimir else None)
             r["por_cena"] = {}
             for c in dict.fromkeys(cenas[s]):
-                sel = torch.from_numpy(np.flatnonzero(cenas[s] == c)).to(dev)
+                sel = torch.from_numpy(np.flatnonzero(cenas[s] == c))
                 r["por_cena"][c] = metricas(
-                    matriz(pred[sel], Y[s][sel], None if mk is None else mk[sel]),
+                    matriz(_ix(pred, sel), _ix(Y[s], sel),
+                           None if mk is None else _ix(mk, sel)),
                     "%s | %s | cena %s" % (s.upper(), escopo, c)
                     if imprimir and escopo == "interior" else None)
             res[s][escopo] = r
