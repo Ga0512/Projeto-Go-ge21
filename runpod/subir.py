@@ -31,6 +31,7 @@ Uso (a partir da raiz do repositório):
     python runpod/subir.py ... --baixar               # traz de volta
 """
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 import sys
 import time
@@ -88,7 +89,7 @@ def remotos(cli, bucket, prefixo):
         tok = r.get("NextContinuationToken")
 
 
-def enviar(cli, bucket, origem, destino, forcar, tudo=False):
+def enviar(cli, bucket, origem, destino, forcar, tudo=False, workers=1):
     origem = os.path.abspath(origem)
     if not os.path.exists(origem):
         sys.exit("nao existe: " + origem)
@@ -117,17 +118,20 @@ def enviar(cli, bucket, origem, destino, forcar, tudo=False):
         return
 
     t0, feito = time.time(), 0
-    for i, (p, k) in enumerate(pendentes, 1):
-        cli.upload_file(p, bucket, k)
-        feito += os.path.getsize(p)
-        dt = time.time() - t0
-        if i % 25 == 0 or i == len(pendentes):
-            print("  %d/%d | %.2f/%.2f GB | %.1f MB/s | faltam %s"
-                  % (i, len(pendentes), feito / 2**30, total / 2**30,
-                     feito / 2**20 / max(dt, 1e-9),
-                     time.strftime("%H:%M:%S",
-                                   time.gmtime((total - feito) / max(feito / dt, 1)))),
-                  flush=True)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        tarefas = {pool.submit(cli.upload_file, p, bucket, k): os.path.getsize(p)
+                   for p, k in pendentes}
+        for i, tarefa in enumerate(as_completed(tarefas), 1):
+            tarefa.result()
+            feito += tarefas[tarefa]
+            dt = time.time() - t0
+            if i % 25 == 0 or i == len(pendentes):
+                print("  %d/%d | %.2f/%.2f GB | %.1f MB/s | faltam %s"
+                      % (i, len(pendentes), feito / 2**30, total / 2**30,
+                         feito / 2**20 / max(dt, 1e-9),
+                         time.strftime("%H:%M:%S",
+                                       time.gmtime((total - feito) / max(feito / dt, 1)))),
+                      flush=True)
     print("enviado em %.0f s" % (time.time() - t0))
 
 
@@ -154,6 +158,8 @@ def baixar(cli, bucket, prefixo, destino):
     prefixo = prefixo.rstrip("/") + "/" if prefixo else ""
     os.makedirs(destino, exist_ok=True)
     itens = remotos(cli, bucket, prefixo)
+    if not itens:
+        raise FileNotFoundError("nenhum arquivo no S3 sob " + prefixo)
     print("%d arquivos sob %s" % (len(itens), prefixo), flush=True)
     for i, (k, tam) in enumerate(sorted(itens.items()), 1):
         if k.endswith("/"):
@@ -184,7 +190,11 @@ def main():
     ap.add_argument("--forcar", action="store_true", help="reenvia mesmo o que ja esta la")
     ap.add_argument("--tudo", action="store_true",
                     help="inclui runs, logs e outros artefatos ao enviar resultados")
+    ap.add_argument("--workers", type=int, default=1,
+                    help="uploads paralelos; use 8 para milhares de patches pequenos")
     a = ap.parse_args()
+    if a.workers < 1:
+        ap.error("--workers precisa ser >= 1")
 
     if not a.volume or not a.datacenter:
         sys.exit("faltou --volume e/ou --datacenter (ver runpod/LEIAME.md)")
@@ -206,7 +216,7 @@ def main():
     else:
         if not a.origem or not a.para:
             sys.exit("informe a origem local e --para <caminho no volume>")
-        enviar(cli, a.volume, a.origem, a.para, a.forcar, a.tudo)
+        enviar(cli, a.volume, a.origem, a.para, a.forcar, a.tudo, a.workers)
 
 
 if __name__ == "__main__":

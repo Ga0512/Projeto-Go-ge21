@@ -13,17 +13,18 @@ Uso (no WSL, a partir de Models/):
 """
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
 import time
 
-import ambiente  # noqa: F401: antes de torch, importado por inferencia_cena
+import ambiente  # noqa: F401: configurar caches antes de GDAL/numpy
 import numpy as np
 from osgeo import gdal
 
-from inferencia_cena import ler_ndvi_temporal, preparar_ndvi_temporal
+from ndvi_temporal import ler_ndvi_temporal, preparar_ndvi_temporal
 
 
 NOMES = ["NDVI_median", "NDVI_min", "NDVI_max", "NDVI_stdDev"]
@@ -53,11 +54,21 @@ def copiar_arvore(origem, destino):
             shutil.copy2(arquivo, alvo)
 
 
+def sha256(caminho):
+    h = hashlib.sha256()
+    with caminho.open("rb") as f:
+        for bloco in iter(lambda: f.read(8 * 1024 * 1024), b""):
+            h.update(bloco)
+    return h.hexdigest()
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--origem", required=True, type=Path)
     ap.add_argument("--saida", required=True, type=Path)
     ap.add_argument("--ndvi", required=True, type=Path)
+    ap.add_argument("--ndvi-cache", type=Path,
+                    help="cópia temporária no disco interno do WSL para leituras aleatórias")
     ap.add_argument("--limite", type=int, default=0, help="gera só N imagens para inspeção")
     a = ap.parse_args()
     origem, saida, ndvi = a.origem.resolve(), a.saida.resolve(), a.ndvi.resolve()
@@ -65,6 +76,18 @@ def main():
         ap.error("origem e saída devem ser pastas diferentes")
     if not ndvi.is_file():
         ap.error("NDVI não encontrado: " + str(ndvi))
+    fonte_leitura = ndvi
+    hash_ndvi = None
+    if a.ndvi_cache:
+        cache = a.ndvi_cache.resolve()
+        if not cache.is_file() or cache.stat().st_size != ndvi.stat().st_size:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ndvi, cache)
+        hash_ndvi = sha256(ndvi)
+        if sha256(cache) != hash_ndvi:
+            raise ValueError("cópia NDVI no cache difere do original")
+        fonte_leitura = cache
+        print("[cache] NDVI idêntico ao original: " + str(cache), flush=True)
     receita = json.loads((origem / "receita.json").read_text(encoding="utf-8"))
     if receita["bandas"] != ["PAN", "GLCM_Entropia", "Rugosidade_STD_Gradiente"]:
         ap.error("a origem precisa ter as três bandas PAN/GLCM/rugosidade")
@@ -74,18 +97,22 @@ def main():
         ap.error("origem sem imagens")
     alvo_imagens = saida / "images"
     alvo_imagens.mkdir(parents=True, exist_ok=True)
-    src, vrts, estatisticas = preparar_ndvi_temporal(str(ndvi))
+    src, vrts, estatisticas = preparar_ndvi_temporal(str(fonte_leitura))
     print("[ndvi] " + ", ".join("%s %.5f/%.5f" % (nome, *est)
                                for nome, est in zip(NOMES, estatisticas)), flush=True)
 
     t0, vazios, novos = time.monotonic(), 0, 0
     processar = nomes[:a.limite] if a.limite else nomes
     for i, imagem in enumerate(processar, 1):
+        destino = alvo_imagens / imagem.name
+        # O nome final só aparece depois de os.replace de um TIFF completo.
+        # Evita descomprimir 7 bandas de todos os patches já concluídos ao retomar.
+        if destino.is_file() and not a.limite:
+            continue
         entrada = gdal.Open(str(imagem))
         if entrada.RasterCount != 3:
             raise ValueError("patch sem 3 bandas: " + str(imagem))
         w, h = entrada.RasterXSize, entrada.RasterYSize
-        destino = alvo_imagens / imagem.name
         if imagem_pronta(destino, w, h):
             pronto = gdal.Open(str(destino))
             if a.limite:
@@ -97,8 +124,6 @@ def main():
                         or pronto.GetGeoTransform() != entrada.GetGeoTransform()
                         or pronto.GetProjection() != entrada.GetProjection()):
                     raise ValueError("piloto diferente da origem/inferência: " + str(destino))
-            vazios += int(all(not np.any(pronto.GetRasterBand(k).ReadAsArray())
-                              for k in range(4, 8)))
             pronto = None
             entrada = None
             continue
@@ -126,7 +151,7 @@ def main():
         os.replace(temp, destino)
         novos += 1
         if i % 100 == 0 or i == len(processar):
-            print("%d/%d | novos %d | sem NDVI %d | %.0fs" %
+            print("%d/%d | novos %d | sem NDVI entre novos %d | %.0fs" %
                   (i, len(processar), novos, vazios, time.monotonic() - t0),
                   flush=True)
     src, vrts = None, None
@@ -145,6 +170,7 @@ def main():
         "dataset": origem.name,
         "bandas_extra": NOMES,
         "fonte_ndvi": os.path.relpath(ndvi, origem.parent.parent.parent),
+        "sha256_ndvi": hash_ndvi or sha256(ndvi),
         "normalizacao": "mesmas funções de unet_cnn/inferencia_cena.py",
         "media_desvio_ndvi": {nome: {"media": est[0], "desvio": est[1]}
                               for nome, est in zip(NOMES, estatisticas)},
@@ -154,7 +180,7 @@ def main():
     temp_receita.write_text(json.dumps(receita, ensure_ascii=False, indent=2) + "\n",
                               encoding="utf-8")
     os.replace(temp_receita, saida / "receita.json")
-    print("[pronto] %d patches, %d novos, %d sem NDVI; %.0fs" %
+    print("[pronto] %d patches, %d novos, %d sem NDVI entre novos; %.0fs" %
           (len(nomes), novos, vazios, time.monotonic() - t0), flush=True)
 
 

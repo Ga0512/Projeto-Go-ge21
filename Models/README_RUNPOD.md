@@ -1,5 +1,9 @@
 # U-Net CNN no RunPod: treino, teste e mapa de cena
 
+Para o fluxo novo em que o próprio Pod baixa entradas e envia resultados ao
+Network Volume via S3, veja [runpod/S3.md](../runpod/S3.md). Os passos de `rsync`
+abaixo documentam o fluxo manual anterior.
+
 Este guia usa um **GPU Pod direto**, sem depender de uma GPU ou região específica. O código vem do GitHub; imagens, máscaras e rasters são transferidos separadamente. Os comandos usam o mesmo `unet_cnn/train.py`, `avaliar.py` e `inferencia_cena.py` usados no PC. Leia o docstring de cada script antes de rodar.
 
 ## 1. Defina o experimento
