@@ -92,6 +92,8 @@ def main():
     ap.add_argument("--piloto-y", type=int, default=17216)
     ap.add_argument("--retomar", action="store_true",
                     help="pula treino se checkpoint e relatório já estão no S3")
+    ap.add_argument("--continuar-treino", action="store_true",
+                    help="retoma do ultimo.pth local após uma interrupção")
     a = ap.parse_args()
     if not a.volume or not a.datacenter:
         ap.error("faltou --volume/--datacenter ou RUNPOD_VOLUME_ID/RUNPOD_DATACENTER")
@@ -179,7 +181,10 @@ def main():
                 except (IndexError, ValueError):
                     return
                 if epoca % 5 == 0:
-                    salvar_etapa()
+                    # O treino grava ultimo.pth depois de imprimir a época.
+                    # Enviá-lo aqui concorre com torch.save e pode cortar o job.
+                    # modelo_melhor.pth já foi gravado antes desta linha.
+                    salvar(run / "modelo_melhor.pth")
 
             treino = [PY, "-u", "unet_cnn/train.py", "--nome", a.nome,
                      "--dataset", "../Data/dados/datasets/" + a.dataset,
@@ -190,6 +195,8 @@ def main():
                      "--reamostrar", "--reamostrar-k", "3", "--dados-na-ram"]
             if a.peso_classe:
                 treino += ["--peso-classe"] + [str(p) for p in a.peso_classe]
+            if a.continuar_treino:
+                treino.append("--resume")
             comando(treino, log, ao_ler=salvar_a_cada_cinco_epocas)
             if not (run / "modelo_melhor.pth").is_file():
                 raise FileNotFoundError("treino terminou sem modelo_melhor.pth")
