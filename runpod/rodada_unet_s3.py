@@ -82,6 +82,9 @@ def main():
     ap.add_argument("--lote-val", type=int, default=16)
     ap.add_argument("--epocas", type=int, default=20)
     ap.add_argument("--paciencia", type=int, default=5)
+    ap.add_argument("--aquecimento", type=int, default=5)
+    ap.add_argument("--peso-classe", nargs=3, type=float, default=None,
+                    metavar=("VEG", "NAO_VEG", "AGUA"))
     ap.add_argument("--lote-inferencia", type=int, default=24)
     ap.add_argument("--ladrilho", type=int, default=4096)
     ap.add_argument("--passo", type=int, default=192)
@@ -178,13 +181,16 @@ def main():
                 if epoca % 5 == 0:
                     salvar_etapa()
 
-            comando([PY, "-u", "unet_cnn/train.py", "--nome", a.nome,
+            treino = [PY, "-u", "unet_cnn/train.py", "--nome", a.nome,
                      "--dataset", "../Data/dados/datasets/" + a.dataset,
                      "--arquitetura", "unetpp", "--base", "32",
                      "--lote", str(a.lote), "--lote-val", str(a.lote_val),
                      "--epocas", str(a.epocas), "--paciencia", str(a.paciencia),
-                     "--reamostrar", "--reamostrar-k", "3", "--dados-na-ram"],
-                    log, ao_ler=salvar_a_cada_cinco_epocas)
+                     "--aquecimento", str(a.aquecimento),
+                     "--reamostrar", "--reamostrar-k", "3", "--dados-na-ram"]
+            if a.peso_classe:
+                treino += ["--peso-classe"] + [str(p) for p in a.peso_classe]
+            comando(treino, log, ao_ler=salvar_a_cada_cinco_epocas)
             if not (run / "modelo_melhor.pth").is_file():
                 raise FileNotFoundError("treino terminou sem modelo_melhor.pth")
             salvar_etapa()
