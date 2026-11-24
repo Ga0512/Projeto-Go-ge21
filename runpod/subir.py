@@ -135,13 +135,14 @@ def enviar(cli, bucket, origem, destino, forcar, tudo=False, workers=1):
     print("enviado em %.0f s" % (time.time() - t0))
 
 
-def baixar(cli, bucket, prefixo, destino):
+def baixar(cli, bucket, prefixo, destino, workers=8):
     prefixo = prefixo.strip("/")
     if prefixo:
         try:
             cabecalho = cli.head_object(Bucket=bucket, Key=prefixo)
         except ClientError as erro:
-            if erro.response.get("Error", {}).get("Code") not in ("404", "NoSuchKey", "NotFound"):
+            if erro.response.get("Error", {}).get("Code") not in (
+                    "400", "BadRequest", "404", "NoSuchKey", "NotFound"):
                 raise
         else:
             if os.path.isdir(destino):
@@ -161,19 +162,29 @@ def baixar(cli, bucket, prefixo, destino):
     if not itens:
         raise FileNotFoundError("nenhum arquivo no S3 sob " + prefixo)
     print("%d arquivos sob %s" % (len(itens), prefixo), flush=True)
-    for i, (k, tam) in enumerate(sorted(itens.items()), 1):
+    pendentes = []
+    for k, tam in sorted(itens.items()):
         if k.endswith("/"):
             continue
         rel = k[len(prefixo):].lstrip("/")
         alvo = os.path.join(destino, rel.replace("/", os.sep))
-        if os.path.exists(alvo) and os.path.getsize(alvo) == tam:
-            continue
+        if not (os.path.isfile(alvo) and os.path.getsize(alvo) == tam):
+            pendentes.append((k, alvo))
+
+    def transferir(item):
+        k, alvo = item
         os.makedirs(os.path.dirname(alvo), exist_ok=True)
         temporario = alvo + ".part"
         cli.download_file(bucket, k, temporario)
         os.replace(temporario, alvo)
-        if i % 25 == 0:
-            print("  %d/%d" % (i, len(itens)), flush=True)
+
+    print("%d arquivos a baixar" % len(pendentes), flush=True)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        tarefas = [pool.submit(transferir, item) for item in pendentes]
+        for i, tarefa in enumerate(as_completed(tarefas), 1):
+            tarefa.result()
+            if i % 100 == 0 or i == len(pendentes):
+                print("  %d/%d" % (i, len(pendentes)), flush=True)
     print("-> " + destino)
 
 
@@ -212,7 +223,7 @@ def main():
         for p, (n, v) in sorted(pastas.items()):
             print("  %-48s %5d arq  %8.2f GB" % (p, n, v / 2**30))
     elif a.baixar:
-        baixar(cli, a.volume, a.origem or "", a.para or ".")
+        baixar(cli, a.volume, a.origem or "", a.para or ".", a.workers)
     else:
         if not a.origem or not a.para:
             sys.exit("informe a origem local e --para <caminho no volume>")
