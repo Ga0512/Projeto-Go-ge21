@@ -54,6 +54,8 @@ from unet import UNet, UNetPP
 
 sys.path.insert(0, os.path.join(dados.DATA, "scripts", "wv1"))
 from gerar_features_pan import features_block  # noqa: E402
+sys.path.insert(0, os.path.join(dados.DATA, "scripts", "spot5"))
+from gerar_features_cena import features_gpu  # noqa: E402
 
 gdal.UseExceptions()
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -73,19 +75,24 @@ def preencher_nodata(pan, valido):
     return pan[tuple(idx)]
 
 
-def texturas(pan, valido, p2, p98, janela, niveis):
+def texturas(pan, valido, p2, p98, janela, niveis, dev=None):
     half = janela // 2
     pan = np.pad(preencher_nodata(pan, valido), MARGEM, mode="reflect")
     s = (np.clip((pan - p2) / (p98 - p2), 0, 1) * 255 + 0.5).astype(np.uint8)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        _, std, ent, grad = features_block(s, s.shape[0] - 2 * half, janela, niveis)
+    if dev is None:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            _, std, ent, grad = features_block(s, s.shape[0] - 2 * half, janela, niveis)
+    else:
+        std, ent, grad = features_gpu(s, s.shape[0] - 2 * half,
+                                     janela, niveis, dev)
     H, W = pan.shape[0] - 2 * MARGEM, pan.shape[1] - 2 * MARGEM
     corta = (slice(MARGEM - half, MARGEM - half + H), slice(MARGEM, MARGEM + W))
     return pan[MARGEM:MARGEM + H, MARGEM:MARGEM + W], ent[corta], std[corta], grad[corta]
 
 
-def bandas(pan, valido, st, janela, niveis):
-    pan, ent, std, grad = texturas(pan, valido, st["p2"], st["p98"], janela, niveis)
+def bandas(pan, valido, st, janela, niveis, dev=None):
+    pan, ent, std, grad = texturas(pan, valido, st["p2"], st["p98"],
+                                   janela, niveis, dev)
     z = lambda a, k: (a - st["media"][k]) / st["desvio"][k]  # noqa: E731
     rug = (z(std, "std") + z(grad, "grad")) / 2
     return np.stack([z(pan, "pan"), z(ent, "glcm"), z(rug, "rugosidade")]).astype(np.float32)
@@ -303,6 +310,10 @@ def main():
                          "<pan>_glcm_v18.tif e <pan>_rugosidade_v18.tif em vez de recalcular. "
                          "ATENCAO: so servem se geradas com as estatisticas DESTE dataset; "
                          "as de outra versao parecem certas e nao sao")
+    ap.add_argument("--texturas-gpu", action="store_true",
+                    help="calcula GLCM, STD e gradiente na GPU, sem mudar as estatisticas")
+    ap.add_argument("--texturas-cpu", action="store_true",
+                    help="forca calculo das texturas na CPU")
     ap.add_argument("--banda-extra", default=None, metavar="RASTER",
                     help="raster de uma banda acrescentado como ultima entrada "
                          "(ex.: NDVI). Reprojetado por janela, entao pode estar "
@@ -336,6 +347,8 @@ def main():
     ap.add_argument("--unir", action="store_true",
                     help="so junta as faixas ja existentes em classes.tif (nao infere)")
     args = ap.parse_args()
+    if args.texturas_gpu and args.texturas_cpu:
+        ap.error("use --texturas-gpu ou --texturas-cpu, nao ambos")
     if args.banda_extra and args.ndvi_temporal:
         ap.error("use --banda-extra ou --ndvi-temporal, nao ambos")
     if args.ate_col and not args.ladrilho:
@@ -356,6 +369,11 @@ def main():
     print("[classes] %d: %s" % (N, ", ".join(dados.CLASS_NOMES)))
 
     dev = ambiente.exigir_gpu()
+    gpu_texturas = (args.texturas_gpu or
+                    (not args.texturas_cpu and
+                     torch.cuda.get_device_properties(dev).total_memory >= 20 * 1024 ** 3))
+    print("[texturas] calculo na %s" % ("GPU" if gpu_texturas else "CPU"),
+          flush=True)
     modelo, ck, arq, base = carregar_modelo(args.modelo, dev, N)
     extra_src = None
     if args.banda_extra:
@@ -479,7 +497,8 @@ def main():
                               % (n_faixas, total, x0, y0), flush=True)
                     continue
                 if tex is None:
-                    X = bandas(pan, valido, st, par["janela"], par["niveis"])
+                    X = bandas(pan, valido, st, par["janela"], par["niveis"],
+                               dev if gpu_texturas else None)
                 else:
                     zp = (pan - st["media"]["pan"]) / st["desvio"]["pan"]
                     X = np.stack([zp] + [bb.ReadAsArray(xa, ya, xb - xa, yb - ya)
@@ -553,7 +572,8 @@ def main():
             del pan, valido
             continue
         if tex is None:
-            X = bandas(pan, valido, st, par["janela"], par["niveis"])
+            X = bandas(pan, valido, st, par["janela"], par["niveis"],
+                       dev if gpu_texturas else None)
         else:
             zp = (pan - st["media"]["pan"]) / st["desvio"]["pan"]
             X = np.stack([zp] + [b.ReadAsArray(0, ya, W, yb - ya).astype(np.float32) * sc + off

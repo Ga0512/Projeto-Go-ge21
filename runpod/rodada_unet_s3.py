@@ -213,7 +213,8 @@ def main():
                       "--modelo", str(run / "modelo_melhor.pth"),
                       "--dataset", str(dataset), "--cena", a.cena,
                       "--ndvi-temporal", str(RAIZ / a.ndvi),
-                      "--passo", str(a.passo), "--lote", str(a.lote_inferencia)]
+                      "--passo", str(a.passo), "--lote", str(a.lote_inferencia),
+                      "--texturas-gpu"]
         if not (piloto / "classes.tif").is_file():
             comando(base_infer + ["--imagem", str(recorte), "--saida", str(piloto),
                                  "--ladrilho", "1024"], log)
