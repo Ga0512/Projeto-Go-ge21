@@ -26,6 +26,7 @@ import subprocess
 import sys
 import time
 
+from botocore.exceptions import ClientError
 from subir import baixar, cliente, enviar
 
 
@@ -105,7 +106,21 @@ def main():
     mapa = run / ("cena_" + a.cena)
     enviados = {}
 
-    def baixar_entrada(key):
+    def baixar_entrada(key, esperar_s=0):
+        if esperar_s:
+            limite = time.monotonic() + esperar_s
+            while True:
+                try:
+                    cli.head_object(Bucket=a.volume, Key=key)
+                    break
+                except ClientError as erro:
+                    codigo = erro.response.get("Error", {}).get("Code")
+                    if codigo not in ("404", "NoSuchKey", "NotFound"):
+                        raise
+                    if time.monotonic() >= limite:
+                        raise TimeoutError("entrada nao chegou ao S3: " + key) from erro
+                    print("[s3] aguardando entrada " + key + " (30 s)", flush=True)
+                    time.sleep(30)
         print("[s3] baixando " + key, flush=True)
         baixar(cli, a.volume, key, str(RAIZ / key))
 
@@ -179,7 +194,7 @@ def main():
                  "--splits", "validacao", "teste", "--lote", str(a.lote_val)], log)
         salvar_etapa()
 
-        baixar_entrada(a.imagem)
+        baixar_entrada(a.imagem, esperar_s=1800)
         baixar_entrada(a.ndvi)
         mapa.mkdir(parents=True, exist_ok=True)
         piloto = run / ("cena_" + a.cena + "_piloto")
