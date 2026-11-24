@@ -85,6 +85,8 @@ def main():
     ap.add_argument("--aquecimento", type=int, default=5)
     ap.add_argument("--peso-classe", nargs=3, type=float, default=None,
                     metavar=("VEG", "NAO_VEG", "AGUA"))
+    ap.add_argument("--borda-raio", type=int, default=0)
+    ap.add_argument("--borda-alfa", type=float, default=0.0)
     ap.add_argument("--lote-inferencia", type=int, default=24)
     ap.add_argument("--ladrilho", type=int, default=4096)
     ap.add_argument("--passo", type=int, default=192)
@@ -195,6 +197,9 @@ def main():
                      "--reamostrar", "--reamostrar-k", "3", "--dados-na-ram"]
             if a.peso_classe:
                 treino += ["--peso-classe"] + [str(p) for p in a.peso_classe]
+            if a.borda_raio and a.borda_alfa:
+                treino += ["--borda-raio", str(a.borda_raio),
+                           "--borda-alfa", str(a.borda_alfa)]
             if a.continuar_treino:
                 treino.append("--resume")
             comando(treino, log, ao_ler=salvar_a_cada_cinco_epocas)
