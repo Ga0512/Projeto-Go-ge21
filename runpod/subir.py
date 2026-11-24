@@ -47,7 +47,7 @@ DATACENTERS = [
 ]
 # arquivos que não fazem sentido no volume
 IGNORAR = (".git", "__pycache__", ".cache", ".venv", "runs", "inferencias",
-           ".pyc", ".tar.gz", ".log")
+           ".pyc", ".tar.gz", ".log", ".tmp.tif")
 
 
 def cliente(datacenter):
