@@ -34,7 +34,7 @@ import torch
 import torch.nn.functional as F
 
 import dados
-from unet import UNet, UNetPP
+from unet import criar_modelo
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 N = dados.N_CLASSES
@@ -457,6 +457,10 @@ def main():
     ap.add_argument("--base", type=int, default=32, help="canais do 1º nível do encoder")
     ap.add_argument("--arquitetura", default="unetpp", choices=["unet", "unetpp"],
                     help="unet = clássica; unetpp = U-Net++ (skip densas)")
+    ap.add_argument("--atencao-entrada", action="store_true",
+                    help="Channel Attention nas bandas originais da UNet++")
+    ap.add_argument("--cbam-decoder", action="store_true",
+                    help="CBAM nos seis nós do decoder da UNet++")
     ap.add_argument("--epocas", type=int, default=100)
     ap.add_argument("--juntar-agua", action="store_true",
                     help="funde Água em Não vegetação (2 classes). Desligado por padrão: "
@@ -536,6 +540,8 @@ def main():
     ap.add_argument("--min-livre-c-gb", type=float, default=1.0,
                     help="trava: para se o C: (/mnt/c) ficar abaixo disso")
     args = ap.parse_args()
+    if args.arquitetura != "unetpp" and (args.atencao_entrada or args.cbam_decoder):
+        ap.error("as opções de atenção exigem --arquitetura unetpp")
 
     dados.configurar(args.dataset, args.juntar_agua)   # nº de classes seguem o dataset (v13=4, v15=3)
     N = dados.N_CLASSES
@@ -617,8 +623,8 @@ def main():
         relatar_reamostragem(pesos, frac_tr, cenas["treino"], N,
                              args.reamostrar_k, alvo)
 
-    modelo = (UNet if args.arquitetura == "unet" else UNetPP)(
-        in_chans=X["treino"].shape[1], n_classes=N, base=args.base).to(dev)
+    modelo = criar_modelo(args.arquitetura, X["treino"].shape[1], N, args.base,
+                          args.atencao_entrada, args.cbam_decoder).to(dev)
     if args.inicializar:
         ck = torch.load(args.inicializar, map_location="cpu", weights_only=False)
         sd = ck["state_dict"]

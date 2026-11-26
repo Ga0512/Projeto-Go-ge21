@@ -87,6 +87,10 @@ def main():
                     metavar=("VEG", "NAO_VEG", "AGUA"))
     ap.add_argument("--borda-raio", type=int, default=0)
     ap.add_argument("--borda-alfa", type=float, default=0.0)
+    ap.add_argument("--atencao-entrada", action="store_true",
+                    help="Channel Attention nas bandas de entrada da UNet++")
+    ap.add_argument("--cbam-decoder", action="store_true",
+                    help="CBAM nos seis nós do decoder da UNet++")
     ap.add_argument("--lote-inferencia", type=int, default=24)
     ap.add_argument("--ladrilho", type=int, default=4096)
     ap.add_argument("--passo", type=int, default=192)
@@ -148,7 +152,9 @@ def main():
 
     def salvar_etapa():
         for nome in ("modelo_melhor.pth", "ultimo.pth", "relatorio.json",
-                     "relatorio_completo.json", "log.csv", "rodada_s3.log"):
+                     "relatorio_completo.json", "log.csv", "rodada_s3.log",
+                     "atencao_validacao.csv", "atencao_validacao_resumo.json",
+                     "atencao_teste.csv", "atencao_teste_resumo.json"):
             salvar(run / nome)
         for nome in ("classes.tif", "classes.png", "info.json"):
             salvar(mapa / nome)
@@ -200,6 +206,10 @@ def main():
             if a.borda_raio and a.borda_alfa:
                 treino += ["--borda-raio", str(a.borda_raio),
                            "--borda-alfa", str(a.borda_alfa)]
+            if a.atencao_entrada:
+                treino.append("--atencao-entrada")
+            if a.cbam_decoder:
+                treino.append("--cbam-decoder")
             if a.continuar_treino:
                 treino.append("--resume")
             comando(treino, log, ao_ler=salvar_a_cada_cinco_epocas)
@@ -210,6 +220,10 @@ def main():
         comando([PY, "-u", "unet_cnn/avaliar.py", "--nome", a.nome,
                  "--dataset", "../Data/dados/datasets/" + a.dataset,
                  "--splits", "validacao", "teste", "--lote", str(a.lote_val)], log)
+        if a.atencao_entrada:
+            comando([PY, "-u", "unet_cnn/auditar_atencao.py", "--nome", a.nome,
+                     "--dataset", "../Data/dados/datasets/" + a.dataset,
+                     "--lote", str(a.lote_val)], log)
         salvar_etapa()
 
         baixar_entrada(a.imagem, esperar_s=1800)

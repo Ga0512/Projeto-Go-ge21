@@ -12,6 +12,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from atencao import AtencaoCanais, CBAM
+
 
 class ConvBloco(nn.Module):
     def __init__(self, cin, cout):
@@ -76,9 +78,16 @@ class UNetPP(nn.Module):
     bottleneck); o decoder denso tem profundidade 4 (X0..X3).
     """
 
-    def __init__(self, in_chans=3, n_classes=4, base=32):
+    def __init__(self, in_chans=3, n_classes=4, base=32,
+                 atencao_entrada=False, cbam_decoder=False):
         super().__init__()
         c = [base * (2 ** i) for i in range(5)]          # 32,64,128,256,512 (base 32)
+        self.atencao_entrada = (AtencaoCanais(in_chans) if atencao_entrada
+                                else nn.Identity())
+        self.cbam_decoder = (nn.ModuleDict({
+            "x01": CBAM(c[0]), "x11": CBAM(c[1]), "x21": CBAM(c[2]),
+            "x02": CBAM(c[0]), "x12": CBAM(c[1]), "x03": CBAM(c[0]),
+        }) if cbam_decoder else nn.ModuleDict())
         self.e0 = ConvBloco(in_chans, c[0])              # 256
         self.e1 = nn.Sequential(nn.MaxPool2d(2), ConvBloco(c[0], c[1]))    # 128
         self.e2 = nn.Sequential(nn.MaxPool2d(2), ConvBloco(c[1], c[2]))    #  64
@@ -101,6 +110,7 @@ class UNetPP(nn.Module):
         self.cabeca = nn.Conv2d(c[0], n_classes, 1)
 
     def forward(self, x):
+        x = self.atencao_entrada(x)
         x00 = self.e0(x)
         x10 = self.e1(x00)
         x20 = self.e2(x10)
@@ -110,10 +120,38 @@ class UNetPP(nn.Module):
         def up(t):
             return F.interpolate(t, scale_factor=2, mode="bilinear", align_corners=False)
 
-        x01 = self.x01(torch.cat([x00, up(x10)], dim=1))
-        x11 = self.x11(torch.cat([x10, up(x20)], dim=1))
-        x21 = self.x21(torch.cat([x20, up(x30)], dim=1))
-        x02 = self.x02(torch.cat([x00, x01, up(x11)], dim=1))
-        x12 = self.x12(torch.cat([x10, x11, up(x21)], dim=1))
-        x03 = self.x03(torch.cat([x00, x01, x02, up(x12)], dim=1))
+        x01 = self._refinar("x01", self.x01(torch.cat([x00, up(x10)], dim=1)))
+        x11 = self._refinar("x11", self.x11(torch.cat([x10, up(x20)], dim=1)))
+        x21 = self._refinar("x21", self.x21(torch.cat([x20, up(x30)], dim=1)))
+        x02 = self._refinar("x02", self.x02(torch.cat([x00, x01, up(x11)], dim=1)))
+        x12 = self._refinar("x12", self.x12(torch.cat([x10, x11, up(x21)], dim=1)))
+        x03 = self._refinar("x03", self.x03(torch.cat([x00, x01, x02, up(x12)], dim=1)))
         return self.cabeca(x03)
+
+    def _refinar(self, nome, x):
+        return self.cbam_decoder[nome](x) if nome in self.cbam_decoder else x
+
+    def pesos_entrada(self, x):
+        """Pesos B,C da entrada; não altera o estado nem guarda ativações."""
+        if not isinstance(self.atencao_entrada, AtencaoCanais):
+            raise RuntimeError("este modelo não tem atenção na entrada")
+        return self.atencao_entrada.pesos(x).flatten(1)
+
+
+def criar_modelo(arquitetura, in_chans, n_classes, base=32,
+                 atencao_entrada=False, cbam_decoder=False):
+    """Fábrica única para treino, avaliação e inferência de checkpoints."""
+    if arquitetura == "unetpp":
+        return UNetPP(in_chans, n_classes, base, atencao_entrada, cbam_decoder)
+    if arquitetura == "unet" and not (atencao_entrada or cbam_decoder):
+        return UNet(in_chans, n_classes, base)
+    raise ValueError("atenção só é suportada em --arquitetura unetpp")
+
+
+def modelo_do_checkpoint(ck, n_classes):
+    """Reconstitui a arquitetura com as opções registradas pelo train.py."""
+    a = ck.get("args", {})
+    canais = ck["state_dict"]["e0.net.0.weight"].shape[1]
+    return criar_modelo(a.get("arquitetura", "unetpp"), canais, n_classes,
+                        a.get("base", 32), a.get("atencao_entrada", False),
+                        a.get("cbam_decoder", False))

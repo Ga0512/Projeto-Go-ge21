@@ -50,7 +50,7 @@ import torch
 from osgeo import gdal
 
 import dados
-from unet import UNet, UNetPP
+from unet import modelo_do_checkpoint
 
 sys.path.insert(0, os.path.join(dados.DATA, "scripts", "wv1"))
 from gerar_features_pan import features_block  # noqa: E402
@@ -285,11 +285,8 @@ def carregar_modelo(caminho, dev, n_classes):
     a = ck.get("args", {})
     arq = a.get("arquitetura", "unetpp")
     base = a.get("base", 32)
-    sd = ck["state_dict"]
-    canais = next(v for k, v in sd.items() if k.endswith("weight") and v.ndim == 4).shape[1]
-    modelo = (UNet if arq == "unet" else UNetPP)(
-        in_chans=canais, n_classes=n_classes, base=base).to(dev)
-    modelo.load_state_dict(sd)
+    modelo = modelo_do_checkpoint(ck, n_classes).to(dev)
+    modelo.load_state_dict(ck["state_dict"])
     modelo.eval()
     return modelo, ck, arq, base
 

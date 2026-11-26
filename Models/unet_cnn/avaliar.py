@@ -30,7 +30,7 @@ import numpy as np
 import torch
 
 import dados
-from unet import UNet, UNetPP
+from unet import modelo_do_checkpoint
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 N = dados.N_CLASSES
@@ -142,11 +142,8 @@ def main():
     a = ck.get("args", {})
     arq = a.get("arquitetura", "unetpp")
     base = a.get("base", 32)
-    sd = ck["state_dict"]
-    canais = next(v for k, v in sd.items() if k.endswith("weight") and v.ndim == 4).shape[1]
-    modelo = (UNet if arq == "unet" else UNetPP)(
-        in_chans=canais, n_classes=N, base=base).to(dev)
-    modelo.load_state_dict(sd)
+    modelo = modelo_do_checkpoint(ck, N).to(dev)
+    modelo.load_state_dict(ck["state_dict"])
     modelo.eval()
     print("[modelo] %s | %s base=%d | epoca %s (val mIoU=%.4f)"
           % (cam_modelo, arq, base, ck.get("epoca", "?"), ck.get("val_miou", float("nan"))),

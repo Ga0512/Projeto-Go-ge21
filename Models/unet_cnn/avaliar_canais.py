@@ -37,7 +37,7 @@ import numpy as np
 import torch
 
 import dados
-from unet import UNet, UNetPP
+from unet import modelo_do_checkpoint
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 
@@ -138,8 +138,7 @@ def main():
     print("[dados] split %s: %d patches | %d canais | interior = margem %d px"
           % (args.split, len(X), X.shape[1], margem), flush=True)
 
-    modelo = (UNet if ta.get("arquitetura", "unetpp") == "unet" else UNetPP)(
-        in_chans=X.shape[1], n_classes=N, base=ta.get("base", 32))
+    modelo = modelo_do_checkpoint(ck, N)
     modelo.load_state_dict(ck["state_dict"])
     modelo = modelo.to(dev)
     print("[modelo] %s base=%d | %.2fM params"
