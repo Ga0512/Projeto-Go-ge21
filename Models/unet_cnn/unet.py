@@ -14,6 +14,10 @@ import torch.nn.functional as F
 
 from atencao import AtencaoCanais, CBAM
 
+NOS_ENCODER = ("e0", "e1", "e2", "e3")
+NOS_DECODER = ("x01", "x11", "x21", "x02", "x12", "x03")
+NOS_CBAM = NOS_ENCODER + NOS_DECODER
+
 
 class ConvBloco(nn.Module):
     def __init__(self, cin, cout):
@@ -79,15 +83,27 @@ class UNetPP(nn.Module):
     """
 
     def __init__(self, in_chans=3, n_classes=4, base=32,
-                 atencao_entrada=False, cbam_decoder=False):
+                 atencao_entrada=False, cbam_decoder=False,
+                 cbam_encoder=False, cbam_nos=None):
         super().__init__()
         c = [base * (2 ** i) for i in range(5)]          # 32,64,128,256,512 (base 32)
+        selecionados = set(cbam_nos or ())
+        desconhecidos = selecionados.difference(NOS_CBAM)
+        if desconhecidos:
+            raise ValueError("nós CBAM desconhecidos: %s" % sorted(desconhecidos))
+        if cbam_encoder:
+            selecionados.update(NOS_ENCODER)
+        if cbam_decoder:
+            selecionados.update(NOS_DECODER)
         self.atencao_entrada = (AtencaoCanais(in_chans) if atencao_entrada
                                 else nn.Identity())
-        self.cbam_decoder = (nn.ModuleDict({
-            "x01": CBAM(c[0]), "x11": CBAM(c[1]), "x21": CBAM(c[2]),
-            "x02": CBAM(c[0]), "x12": CBAM(c[1]), "x03": CBAM(c[0]),
-        }) if cbam_decoder else nn.ModuleDict())
+        canais_nos = {"e0": c[0], "e1": c[1], "e2": c[2], "e3": c[3],
+                      "x01": c[0], "x11": c[1], "x21": c[2],
+                      "x02": c[0], "x12": c[1], "x03": c[0]}
+        self.cbam_encoder = nn.ModuleDict({n: CBAM(canais_nos[n])
+                                           for n in NOS_ENCODER if n in selecionados})
+        self.cbam_decoder = nn.ModuleDict({n: CBAM(canais_nos[n])
+                                           for n in NOS_DECODER if n in selecionados})
         self.e0 = ConvBloco(in_chans, c[0])              # 256
         self.e1 = nn.Sequential(nn.MaxPool2d(2), ConvBloco(c[0], c[1]))    # 128
         self.e2 = nn.Sequential(nn.MaxPool2d(2), ConvBloco(c[1], c[2]))    #  64
@@ -111,10 +127,10 @@ class UNetPP(nn.Module):
 
     def forward(self, x):
         x = self.atencao_entrada(x)
-        x00 = self.e0(x)
-        x10 = self.e1(x00)
-        x20 = self.e2(x10)
-        x30 = self.e3(x20)
+        x00 = self._refinar("e0", self.e0(x))
+        x10 = self._refinar("e1", self.e1(x00))
+        x20 = self._refinar("e2", self.e2(x10))
+        x30 = self._refinar("e3", self.e3(x20))
         b = self.bot(x30)
 
         def up(t):
@@ -129,6 +145,8 @@ class UNetPP(nn.Module):
         return self.cabeca(x03)
 
     def _refinar(self, nome, x):
+        if nome in self.cbam_encoder:
+            return self.cbam_encoder[nome](x)
         return self.cbam_decoder[nome](x) if nome in self.cbam_decoder else x
 
     def pesos_entrada(self, x):
@@ -139,11 +157,14 @@ class UNetPP(nn.Module):
 
 
 def criar_modelo(arquitetura, in_chans, n_classes, base=32,
-                 atencao_entrada=False, cbam_decoder=False):
+                 atencao_entrada=False, cbam_decoder=False,
+                 cbam_encoder=False, cbam_nos=None):
     """Fábrica única para treino, avaliação e inferência de checkpoints."""
     if arquitetura == "unetpp":
-        return UNetPP(in_chans, n_classes, base, atencao_entrada, cbam_decoder)
-    if arquitetura == "unet" and not (atencao_entrada or cbam_decoder):
+        return UNetPP(in_chans, n_classes, base, atencao_entrada, cbam_decoder,
+                      cbam_encoder, cbam_nos)
+    if arquitetura == "unet" and not (atencao_entrada or cbam_decoder or
+                                      cbam_encoder or cbam_nos):
         return UNet(in_chans, n_classes, base)
     raise ValueError("atenção só é suportada em --arquitetura unetpp")
 
@@ -154,4 +175,5 @@ def modelo_do_checkpoint(ck, n_classes):
     canais = ck["state_dict"]["e0.net.0.weight"].shape[1]
     return criar_modelo(a.get("arquitetura", "unetpp"), canais, n_classes,
                         a.get("base", 32), a.get("atencao_entrada", False),
-                        a.get("cbam_decoder", False))
+                        a.get("cbam_decoder", False), a.get("cbam_encoder", False),
+                        a.get("cbam_nos"))

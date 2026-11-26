@@ -91,6 +91,10 @@ def main():
                     help="Channel Attention nas bandas de entrada da UNet++")
     ap.add_argument("--cbam-decoder", action="store_true",
                     help="CBAM nos seis nós do decoder da UNet++")
+    ap.add_argument("--cbam-encoder", action="store_true",
+                    help="CBAM nos quatro nós do encoder da UNet++")
+    ap.add_argument("--cbam-nos", nargs="+", default=None,
+                    help="nós específicos da UNet++ para receber CBAM")
     ap.add_argument("--lote-inferencia", type=int, default=24)
     ap.add_argument("--ladrilho", type=int, default=4096)
     ap.add_argument("--passo", type=int, default=192)
@@ -210,6 +214,10 @@ def main():
                 treino.append("--atencao-entrada")
             if a.cbam_decoder:
                 treino.append("--cbam-decoder")
+            if a.cbam_encoder:
+                treino.append("--cbam-encoder")
+            if a.cbam_nos:
+                treino += ["--cbam-nos"] + a.cbam_nos
             if a.continuar_treino:
                 treino.append("--resume")
             comando(treino, log, ao_ler=salvar_a_cada_cinco_epocas)

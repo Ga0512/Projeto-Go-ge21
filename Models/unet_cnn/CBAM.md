@@ -4,8 +4,18 @@
 PyTorch independentes. Na `UNetPP`, as opções são independentes:
 
 - `--atencao-entrada`: aplica `AtencaoCanais` às bandas antes do encoder.
+- `--cbam-encoder`: aplica `CBAM` depois de `e0`, `e1`, `e2`, `e3`.
 - `--cbam-decoder`: aplica `CBAM` depois dos seis blocos convolucionais do
   decoder denso (`x01`, `x11`, `x21`, `x02`, `x12`, `x03`).
+- `--cbam-nos e1 x03`: aplica `CBAM` só nos nós indicados. Pode ser combinado
+  com as opções de grupos acima.
+
+Para treinar **somente com CBAM no encoder**, passe `--cbam-encoder` e omita
+`--atencao-entrada` e `--cbam-decoder`. As mesmas opções existem na rodada
+`runpod/rodada_unet_s3.py`; não é preciso editar o modelo para mover a atenção.
+O nó `bot` não é opção porque o forward atual da UNet++ não usa sua saída;
+inseri-lo ali não alteraria a predição. Essa limitação também existe no
+baseline, então não foi alterada neste experimento.
 
 Sem essas opções, a arquitetura e as chaves dos checkpoints antigos continuam
 iguais. `train.py` grava as opções em `modelo_melhor.pth`; `avaliar.py` e

@@ -34,7 +34,7 @@ import torch
 import torch.nn.functional as F
 
 import dados
-from unet import criar_modelo
+from unet import NOS_CBAM, criar_modelo
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 N = dados.N_CLASSES
@@ -461,6 +461,10 @@ def main():
                     help="Channel Attention nas bandas originais da UNet++")
     ap.add_argument("--cbam-decoder", action="store_true",
                     help="CBAM nos seis nós do decoder da UNet++")
+    ap.add_argument("--cbam-encoder", action="store_true",
+                    help="CBAM nos quatro nós do encoder da UNet++")
+    ap.add_argument("--cbam-nos", nargs="+", choices=NOS_CBAM, default=None,
+                    help="nós específicos para CBAM; soma-se às opções de encoder/decoder")
     ap.add_argument("--epocas", type=int, default=100)
     ap.add_argument("--juntar-agua", action="store_true",
                     help="funde Água em Não vegetação (2 classes). Desligado por padrão: "
@@ -540,7 +544,8 @@ def main():
     ap.add_argument("--min-livre-c-gb", type=float, default=1.0,
                     help="trava: para se o C: (/mnt/c) ficar abaixo disso")
     args = ap.parse_args()
-    if args.arquitetura != "unetpp" and (args.atencao_entrada or args.cbam_decoder):
+    if args.arquitetura != "unetpp" and (args.atencao_entrada or args.cbam_decoder
+                                         or args.cbam_encoder or args.cbam_nos):
         ap.error("as opções de atenção exigem --arquitetura unetpp")
 
     dados.configurar(args.dataset, args.juntar_agua)   # nº de classes seguem o dataset (v13=4, v15=3)
@@ -624,7 +629,8 @@ def main():
                              args.reamostrar_k, alvo)
 
     modelo = criar_modelo(args.arquitetura, X["treino"].shape[1], N, args.base,
-                          args.atencao_entrada, args.cbam_decoder).to(dev)
+                          args.atencao_entrada, args.cbam_decoder,
+                          args.cbam_encoder, args.cbam_nos).to(dev)
     if args.inicializar:
         ck = torch.load(args.inicializar, map_location="cpu", weights_only=False)
         sd = ck["state_dict"]

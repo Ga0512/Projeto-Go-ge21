@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Teste curto da UNet++ com atenção na GPU local, sem carregar datasets.
 
-Verifica dimensões, gradientes nas duas atenções, pesos auditáveis e leitura
-de checkpoints novos e antigos. Não executa um treino completo.
+Verifica entrada+decoder, encoder sozinho, nós escolhidos, gradientes,
+pesos auditáveis e leitura de checkpoints novos e antigos.
 
 Uso (no WSL, a partir de Models/):
   ../Data/.venv/bin/python unet_cnn/testar_cbam.py
@@ -60,7 +60,38 @@ def main():
         torch.save(ck, caminho)
         inferido, _, _, _ = carregar_modelo(caminho, "cpu", 3)
         assert inferido.pesos_entrada(torch.zeros(1, 7, 32, 32)).shape == (1, 7)
-    print("OK: GPU %s | loss %.4f | pesos %s | checkpoints novo/antigo/inferência"
+    del modelo, pred, novo, inferido
+    torch.cuda.empty_cache()
+
+    encoder = criar_modelo("unetpp", 7, 3, base=32,
+                           cbam_encoder=True).to(dev).train()
+    assert set(encoder.cbam_encoder) == {"e0", "e1", "e2", "e3"}
+    assert not encoder.cbam_decoder
+    assert isinstance(encoder.atencao_entrada, torch.nn.Identity)
+    entrada = torch.randn(1, 7, 128, 128, device=dev)
+    rotulo = torch.randint(0, 3, (1, 128, 128), device=dev)
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+        pred_encoder = encoder(entrada)
+        loss_encoder = F.cross_entropy(pred_encoder.float(), rotulo)
+    loss_encoder.backward()
+    for no in encoder.cbam_encoder:
+        assert any(p.grad is not None and bool(p.grad.abs().sum() > 0)
+                   for p in encoder.cbam_encoder[no].parameters()), no
+    ck_encoder = {"args": {"arquitetura": "unetpp", "base": 32,
+                           "cbam_encoder": True},
+                  "state_dict": {k: v.cpu() for k, v in encoder.state_dict().items()}}
+    modelo_do_checkpoint(ck_encoder, 3).load_state_dict(ck_encoder["state_dict"],
+                                                       strict=True)
+
+    seletivo = criar_modelo("unetpp", 7, 3, cbam_nos=["e1", "x03"])
+    assert set(seletivo.cbam_encoder) == {"e1"}
+    assert set(seletivo.cbam_decoder) == {"x03"}
+    ck_seletivo = {"args": {"arquitetura": "unetpp", "base": 32,
+                            "cbam_nos": ["e1", "x03"]},
+                   "state_dict": seletivo.state_dict()}
+    modelo_do_checkpoint(ck_seletivo, 3).load_state_dict(
+        ck_seletivo["state_dict"], strict=True)
+    print("OK: GPU %s | loss %.4f | pesos %s | entrada+decoder, encoder, nós específicos e checkpoints"
           % (torch.cuda.get_device_name(dev), loss.item(),
              [round(v, 3) for v in pesos[0].tolist()]), flush=True)
 
