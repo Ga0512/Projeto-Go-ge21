@@ -37,7 +37,7 @@ import numpy as np
 import torch
 
 import dados
-from unet import modelo_do_checkpoint
+from unet import model_from_checkpoint
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 
@@ -138,11 +138,10 @@ def main():
     print("[dados] split %s: %d patches | %d canais | interior = margem %d px"
           % (args.split, len(X), X.shape[1], margem), flush=True)
 
-    modelo = modelo_do_checkpoint(ck, N)
-    modelo.load_state_dict(ck["state_dict"])
+    modelo = model_from_checkpoint(ck, N)
     modelo = modelo.to(dev)
     print("[modelo] %s base=%d | %.2fM params"
-          % (ta.get("arquitetura", "unetpp"), ta.get("base", 32),
+          % (ta.get("architecture", ta.get("arquitetura", "unetpp")), ta.get("base", 32),
              sum(p.numel() for p in modelo.parameters()) / 1e6), flush=True)
 
     # conjuntos de oclusão: nome -> canais neutralizados

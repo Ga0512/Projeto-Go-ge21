@@ -30,7 +30,7 @@ import numpy as np
 import torch
 
 import dados
-from unet import modelo_do_checkpoint
+from unet import model_from_checkpoint
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 N = dados.N_CLASSES
@@ -140,10 +140,9 @@ def main():
         raise SystemExit("%s não existe" % cam_modelo)
     ck = torch.load(cam_modelo, map_location="cpu", weights_only=False)
     a = ck.get("args", {})
-    arq = a.get("arquitetura", "unetpp")
+    arq = a.get("architecture", a.get("arquitetura", "unetpp"))
     base = a.get("base", 32)
-    modelo = modelo_do_checkpoint(ck, N).to(dev)
-    modelo.load_state_dict(ck["state_dict"])
+    modelo = model_from_checkpoint(ck, N).to(dev)
     modelo.eval()
     print("[modelo] %s | %s base=%d | epoca %s (val mIoU=%.4f)"
           % (cam_modelo, arq, base, ck.get("epoca", "?"), ck.get("val_miou", float("nan"))),

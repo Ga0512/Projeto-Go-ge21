@@ -50,7 +50,7 @@ import torch
 from osgeo import gdal
 
 import dados
-from unet import modelo_do_checkpoint
+from unet import model_from_checkpoint
 
 sys.path.insert(0, os.path.join(dados.DATA, "scripts", "wv1"))
 from gerar_features_pan import features_block  # noqa: E402
@@ -283,10 +283,9 @@ def unir_faixas(cls_caminho, pasta, grade=None):
 def carregar_modelo(caminho, dev, n_classes):
     ck = torch.load(caminho, map_location="cpu", weights_only=False)
     a = ck.get("args", {})
-    arq = a.get("arquitetura", "unetpp")
+    arq = a.get("architecture", a.get("arquitetura", "unetpp"))
     base = a.get("base", 32)
-    modelo = modelo_do_checkpoint(ck, n_classes).to(dev)
-    modelo.load_state_dict(ck["state_dict"])
+    modelo = model_from_checkpoint(ck, n_classes).to(dev)
     modelo.eval()
     return modelo, ck, arq, base
 

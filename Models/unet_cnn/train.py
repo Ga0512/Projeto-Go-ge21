@@ -34,7 +34,7 @@ import torch
 import torch.nn.functional as F
 
 import dados
-from unet import NOS_CBAM, criar_modelo
+from unet import ATTENTION_NODES, build_model, normalized_state_dict
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 N = dados.N_CLASSES
@@ -455,16 +455,18 @@ def main():
                          "carrega os pesos que baterem (o nº de classes pode diferir — a "
                          "cabeça com shape novo fica re-inicializada). Use LR baixa.")
     ap.add_argument("--base", type=int, default=32, help="canais do 1º nível do encoder")
-    ap.add_argument("--arquitetura", default="unetpp", choices=["unet", "unetpp"],
-                    help="unet = clássica; unetpp = U-Net++ (skip densas)")
-    ap.add_argument("--atencao-entrada", action="store_true",
-                    help="Channel Attention nas bandas originais da UNet++")
-    ap.add_argument("--cbam-decoder", action="store_true",
-                    help="CBAM nos seis nós do decoder da UNet++")
-    ap.add_argument("--cbam-encoder", action="store_true",
-                    help="CBAM nos quatro nós do encoder da UNet++")
-    ap.add_argument("--cbam-nos", nargs="+", choices=NOS_CBAM, default=None,
-                    help="nós específicos para CBAM; soma-se às opções de encoder/decoder")
+    ap.add_argument("--architecture", default="unetpp", choices=["unet", "unetpp"],
+                    help="unet = classic U-Net; unetpp = U-Net++")
+    ap.add_argument("--arquitetura", dest="architecture", choices=["unet", "unetpp"],
+                    help=argparse.SUPPRESS)
+    ap.add_argument("--attention-input", action="store_true",
+                    help="channel attention on the original input bands")
+    ap.add_argument("--attention-encoder", action="store_true",
+                    help="CBAM after every encoder block")
+    ap.add_argument("--attention-decoder", action="store_true",
+                    help="CBAM after every decoder block")
+    ap.add_argument("--attention-nodes", nargs="+", choices=ATTENTION_NODES,
+                    default=None, help="specific CBAM blocks; combines with encoder/decoder")
     ap.add_argument("--epocas", type=int, default=100)
     ap.add_argument("--juntar-agua", action="store_true",
                     help="funde Água em Não vegetação (2 classes). Desligado por padrão: "
@@ -544,9 +546,6 @@ def main():
     ap.add_argument("--min-livre-c-gb", type=float, default=1.0,
                     help="trava: para se o C: (/mnt/c) ficar abaixo disso")
     args = ap.parse_args()
-    if args.arquitetura != "unetpp" and (args.atencao_entrada or args.cbam_decoder
-                                         or args.cbam_encoder or args.cbam_nos):
-        ap.error("as opções de atenção exigem --arquitetura unetpp")
 
     dados.configurar(args.dataset, args.juntar_agua)   # nº de classes seguem o dataset (v13=4, v15=3)
     N = dados.N_CLASSES
@@ -628,12 +627,12 @@ def main():
         relatar_reamostragem(pesos, frac_tr, cenas["treino"], N,
                              args.reamostrar_k, alvo)
 
-    modelo = criar_modelo(args.arquitetura, X["treino"].shape[1], N, args.base,
-                          args.atencao_entrada, args.cbam_decoder,
-                          args.cbam_encoder, args.cbam_nos).to(dev)
+    modelo = build_model(args.architecture, X["treino"].shape[1], N, args.base,
+                         args.attention_input, args.attention_encoder,
+                         args.attention_decoder, args.attention_nodes).to(dev)
     if args.inicializar:
         ck = torch.load(args.inicializar, map_location="cpu", weights_only=False)
-        sd = ck["state_dict"]
+        sd = normalized_state_dict(ck["state_dict"])
         estado = modelo.state_dict()
         filtrado = {k: v for k, v in sd.items() if k in estado and estado[k].shape == v.shape}
         n_carregadas = len(filtrado)
@@ -644,7 +643,7 @@ def main():
               "(cabeça nova p/ %d classes)" % (args.inicializar, n_carregadas, len(sd),
                                                n_puladas, N), flush=True)
     n_params = sum(p.numel() for p in modelo.parameters())
-    print("[modelo] %s base=%d | %.1fM params" % (args.arquitetura, args.base, n_params / 1e6), flush=True)
+    print("[modelo] %s base=%d | %.1fM params" % (args.architecture, args.base, n_params / 1e6), flush=True)
 
     grupos = []
     for nome, p in modelo.named_parameters():

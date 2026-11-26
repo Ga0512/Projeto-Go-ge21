@@ -1,22 +1,31 @@
-"""U-Net CNN para os patches SPOT5 (256x256, 3 bandas, 4 classes).
+"""U-Net and U-Net++ segmentation models with configurable attention.
 
-Arquitetura clássica: encoder com 4 níveis (2x Conv+BN+ReLU + MaxPool) que
-reduz 256 -> 16 px, bottleneck, e decoder simétrico com ConvTranspose (2x)
-concatenando as skip connections do encoder. Base 32 -> canais 32/64/128/256.
+Input channels, class count and patch size come from the dataset. Attention
+can be placed on input bands or selected encoder and decoder feature blocks.
 
-Serve para comparar com o ViT (seg_mae_v3_*) e o XGBoost no mesmo dataset:
-mesmo treino, mesma augmentation e mesmas métricas (interior).
+Uso (no WSL, a partir de Models/):
+  PYTHONPATH=unet_cnn ../Data/.venv/bin/python -c "from unet import build_model; print(build_model('unetpp', 7, 3))"
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from atencao import AtencaoCanais, CBAM
+from attention import AttentionRouter
 
-NOS_ENCODER = ("e0", "e1", "e2", "e3")
-NOS_DECODER = ("x01", "x11", "x21", "x02", "x12", "x03")
-NOS_CBAM = NOS_ENCODER + NOS_DECODER
+ENCODER_NODES = ("e0", "e1", "e2", "e3")
+UNET_DECODER_NODES = ("d0", "d1", "d2", "d3")
+UNETPP_DECODER_NODES = ("x01", "x11", "x21", "x02", "x12", "x03")
+ATTENTION_NODES = ENCODER_NODES + ("bot",) + UNET_DECODER_NODES + UNETPP_DECODER_NODES
+
+
+def _selected_nodes(encoder, decoder, decoder_nodes, extra):
+    selected = set(extra or ())
+    if encoder:
+        selected.update(ENCODER_NODES)
+    if decoder:
+        selected.update(decoder_nodes)
+    return selected
 
 
 class ConvBloco(nn.Module):
@@ -40,10 +49,20 @@ class Subir(nn.Module):
 
 
 class UNet(nn.Module):
-    """in_chans=3 (PAN, GLCM, rugosidade), n_classes=4 (CLASS_NOMES)."""
+    """Classic U-Net; channel and class counts are dataset dependent."""
 
-    def __init__(self, in_chans=3, n_classes=4, base=32):
+    def __init__(self, in_chans=3, n_classes=4, base=32,
+                 attention_input=False, attention_encoder=False,
+                 attention_decoder=False, attention_nodes=None):
         super().__init__()
+        node_channels = {"e0": base, "e1": base * 2, "e2": base * 4,
+                         "e3": base * 8, "bot": base * 8,
+                         "d0": base * 4, "d1": base * 2,
+                         "d2": base, "d3": base}
+        self.attention = AttentionRouter(
+            in_chans, node_channels, attention_input,
+            _selected_nodes(attention_encoder, attention_decoder,
+                            UNET_DECODER_NODES, attention_nodes))
         self.e0 = ConvBloco(in_chans, base)                            #  32 @ 256
         self.e1 = nn.Sequential(nn.MaxPool2d(2), ConvBloco(base, base * 2))    #  64 @ 128
         self.e2 = nn.Sequential(nn.MaxPool2d(2), ConvBloco(base * 2, base * 4))  # 128 @  64
@@ -57,16 +76,20 @@ class UNet(nn.Module):
         self.cabeca = nn.Conv2d(base, n_classes, 1)
 
     def forward(self, x):
-        e0 = self.e0(x)
-        e1 = self.e1(e0)
-        e2 = self.e2(e1)
-        e3 = self.e3(e2)
-        b = self.bot(e3)
-        x = self.d0[1](torch.cat([self.d0[0](b), e3], dim=1))
-        x = self.d1[1](torch.cat([self.d1[0](x), e2], dim=1))
-        x = self.d2[1](torch.cat([self.d2[0](x), e1], dim=1))
-        x = self.d3[1](torch.cat([self.d3[0](x), e0], dim=1))
+        x = self.attention.apply_input(x)
+        e0 = self.attention.apply_node("e0", self.e0(x))
+        e1 = self.attention.apply_node("e1", self.e1(e0))
+        e2 = self.attention.apply_node("e2", self.e2(e1))
+        e3 = self.attention.apply_node("e3", self.e3(e2))
+        b = self.attention.apply_node("bot", self.bot(e3))
+        x = self.attention.apply_node("d0", self.d0[1](torch.cat([self.d0[0](b), e3], dim=1)))
+        x = self.attention.apply_node("d1", self.d1[1](torch.cat([self.d1[0](x), e2], dim=1)))
+        x = self.attention.apply_node("d2", self.d2[1](torch.cat([self.d2[0](x), e1], dim=1)))
+        x = self.attention.apply_node("d3", self.d3[1](torch.cat([self.d3[0](x), e0], dim=1)))
         return self.cabeca(x)
+
+    def input_attention_weights(self, x):
+        return self.attention.input_weights(x)
 
 
 class UNetPP(nn.Module):
@@ -83,27 +106,17 @@ class UNetPP(nn.Module):
     """
 
     def __init__(self, in_chans=3, n_classes=4, base=32,
-                 atencao_entrada=False, cbam_decoder=False,
-                 cbam_encoder=False, cbam_nos=None):
+                 attention_input=False, attention_encoder=False,
+                 attention_decoder=False, attention_nodes=None):
         super().__init__()
         c = [base * (2 ** i) for i in range(5)]          # 32,64,128,256,512 (base 32)
-        selecionados = set(cbam_nos or ())
-        desconhecidos = selecionados.difference(NOS_CBAM)
-        if desconhecidos:
-            raise ValueError("nós CBAM desconhecidos: %s" % sorted(desconhecidos))
-        if cbam_encoder:
-            selecionados.update(NOS_ENCODER)
-        if cbam_decoder:
-            selecionados.update(NOS_DECODER)
-        self.atencao_entrada = (AtencaoCanais(in_chans) if atencao_entrada
-                                else nn.Identity())
-        canais_nos = {"e0": c[0], "e1": c[1], "e2": c[2], "e3": c[3],
-                      "x01": c[0], "x11": c[1], "x21": c[2],
-                      "x02": c[0], "x12": c[1], "x03": c[0]}
-        self.cbam_encoder = nn.ModuleDict({n: CBAM(canais_nos[n])
-                                           for n in NOS_ENCODER if n in selecionados})
-        self.cbam_decoder = nn.ModuleDict({n: CBAM(canais_nos[n])
-                                           for n in NOS_DECODER if n in selecionados})
+        node_channels = {"e0": c[0], "e1": c[1], "e2": c[2], "e3": c[3],
+                         "x01": c[0], "x11": c[1], "x21": c[2],
+                         "x02": c[0], "x12": c[1], "x03": c[0]}
+        self.attention = AttentionRouter(
+            in_chans, node_channels, attention_input,
+            _selected_nodes(attention_encoder, attention_decoder,
+                            UNETPP_DECODER_NODES, attention_nodes))
         self.e0 = ConvBloco(in_chans, c[0])              # 256
         self.e1 = nn.Sequential(nn.MaxPool2d(2), ConvBloco(c[0], c[1]))    # 128
         self.e2 = nn.Sequential(nn.MaxPool2d(2), ConvBloco(c[1], c[2]))    #  64
@@ -126,54 +139,70 @@ class UNetPP(nn.Module):
         self.cabeca = nn.Conv2d(c[0], n_classes, 1)
 
     def forward(self, x):
-        x = self.atencao_entrada(x)
-        x00 = self._refinar("e0", self.e0(x))
-        x10 = self._refinar("e1", self.e1(x00))
-        x20 = self._refinar("e2", self.e2(x10))
-        x30 = self._refinar("e3", self.e3(x20))
+        x = self.attention.apply_input(x)
+        x00 = self.attention.apply_node("e0", self.e0(x))
+        x10 = self.attention.apply_node("e1", self.e1(x00))
+        x20 = self.attention.apply_node("e2", self.e2(x10))
+        x30 = self.attention.apply_node("e3", self.e3(x20))
         b = self.bot(x30)
 
         def up(t):
             return F.interpolate(t, scale_factor=2, mode="bilinear", align_corners=False)
 
-        x01 = self._refinar("x01", self.x01(torch.cat([x00, up(x10)], dim=1)))
-        x11 = self._refinar("x11", self.x11(torch.cat([x10, up(x20)], dim=1)))
-        x21 = self._refinar("x21", self.x21(torch.cat([x20, up(x30)], dim=1)))
-        x02 = self._refinar("x02", self.x02(torch.cat([x00, x01, up(x11)], dim=1)))
-        x12 = self._refinar("x12", self.x12(torch.cat([x10, x11, up(x21)], dim=1)))
-        x03 = self._refinar("x03", self.x03(torch.cat([x00, x01, x02, up(x12)], dim=1)))
+        x01 = self.attention.apply_node("x01", self.x01(torch.cat([x00, up(x10)], dim=1)))
+        x11 = self.attention.apply_node("x11", self.x11(torch.cat([x10, up(x20)], dim=1)))
+        x21 = self.attention.apply_node("x21", self.x21(torch.cat([x20, up(x30)], dim=1)))
+        x02 = self.attention.apply_node("x02", self.x02(torch.cat([x00, x01, up(x11)], dim=1)))
+        x12 = self.attention.apply_node("x12", self.x12(torch.cat([x10, x11, up(x21)], dim=1)))
+        x03 = self.attention.apply_node("x03", self.x03(torch.cat([x00, x01, x02, up(x12)], dim=1)))
         return self.cabeca(x03)
 
-    def _refinar(self, nome, x):
-        if nome in self.cbam_encoder:
-            return self.cbam_encoder[nome](x)
-        return self.cbam_decoder[nome](x) if nome in self.cbam_decoder else x
-
-    def pesos_entrada(self, x):
-        """Pesos B,C da entrada; não altera o estado nem guarda ativações."""
-        if not isinstance(self.atencao_entrada, AtencaoCanais):
-            raise RuntimeError("este modelo não tem atenção na entrada")
-        return self.atencao_entrada.pesos(x).flatten(1)
+    def input_attention_weights(self, x):
+        """Return B,C input gate weights without storing activations."""
+        return self.attention.input_weights(x)
 
 
-def criar_modelo(arquitetura, in_chans, n_classes, base=32,
-                 atencao_entrada=False, cbam_decoder=False,
-                 cbam_encoder=False, cbam_nos=None):
-    """Fábrica única para treino, avaliação e inferência de checkpoints."""
-    if arquitetura == "unetpp":
-        return UNetPP(in_chans, n_classes, base, atencao_entrada, cbam_decoder,
-                      cbam_encoder, cbam_nos)
-    if arquitetura == "unet" and not (atencao_entrada or cbam_decoder or
-                                      cbam_encoder or cbam_nos):
-        return UNet(in_chans, n_classes, base)
-    raise ValueError("atenção só é suportada em --arquitetura unetpp")
+def build_model(architecture, in_chans, n_classes, base=32,
+                attention_input=False, attention_encoder=False,
+                attention_decoder=False, attention_nodes=None):
+    """Single model factory for training, evaluation and inference."""
+    options = (in_chans, n_classes, base, attention_input, attention_encoder,
+               attention_decoder, attention_nodes)
+    if architecture == "unetpp":
+        return UNetPP(*options)
+    if architecture == "unet":
+        return UNet(*options)
+    raise ValueError("unknown architecture: %s" % architecture)
 
 
-def modelo_do_checkpoint(ck, n_classes):
-    """Reconstitui a arquitetura com as opções registradas pelo train.py."""
-    a = ck.get("args", {})
-    canais = ck["state_dict"]["e0.net.0.weight"].shape[1]
-    return criar_modelo(a.get("arquitetura", "unetpp"), canais, n_classes,
-                        a.get("base", 32), a.get("atencao_entrada", False),
-                        a.get("cbam_decoder", False), a.get("cbam_encoder", False),
-                        a.get("cbam_nos"))
+def normalized_state_dict(state_dict):
+    """Read checkpoints made before the English attention names were adopted."""
+    renamed = {}
+    for key, value in state_dict.items():
+        if key.startswith("atencao_entrada."):
+            key = key.replace("atencao_entrada.", "attention.input.", 1)
+        elif key.startswith("cbam_encoder.") or key.startswith("cbam_decoder."):
+            key = key.replace("cbam_encoder.", "attention.nodes.", 1)
+            key = key.replace("cbam_decoder.", "attention.nodes.", 1)
+        key = key.replace(".canais.projecao.", ".channel.mlp.")
+        key = key.replace(".espacial.", ".spatial.")
+        key = key.replace(".projecao.", ".mlp.")
+        renamed[key] = value
+    return renamed
+
+
+def model_from_checkpoint(checkpoint, n_classes):
+    """Build and strictly load old or new model checkpoints."""
+    args = checkpoint.get("args", {})
+    state = normalized_state_dict(checkpoint["state_dict"])
+    channels = state["e0.net.0.weight"].shape[1]
+    model = build_model(
+        args.get("architecture", args.get("arquitetura", "unetpp")),
+        channels, n_classes,
+        args.get("base", 32),
+        args.get("attention_input", args.get("atencao_entrada", False)),
+        args.get("attention_encoder", args.get("cbam_encoder", False)),
+        args.get("attention_decoder", args.get("cbam_decoder", False)),
+        args.get("attention_nodes", args.get("cbam_nos")))
+    model.load_state_dict(state, strict=True)
+    return model
