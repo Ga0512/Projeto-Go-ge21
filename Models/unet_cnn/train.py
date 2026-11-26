@@ -490,6 +490,11 @@ def main():
                          "pico de 3,4x no sorteio; k=8 chega a 47,6%% com 6,0x; "
                          "k=20 a 66,9%% com 9,2x e amostra efetiva de 29%%. "
                          "0 desliga -- ver pesos_reamostragem()")
+    ap.add_argument("--amostras-por-epoca", type=int, default=None,
+                    help="numero de sorteios por epoca com --reamostrar. "
+                         "Use para comparar datasets de tamanhos diferentes "
+                         "com o mesmo numero de passos por epoca. "
+                         "Padrao: numero de patches de treino.")
     ap.add_argument("--borda-raio", type=int, default=0, metavar="R",
                     help="faixa de R px ao redor da fronteira entre classes. "
                          "Com --borda-alfa, a CE pesa (1+alfa) ali. 16 px = "
@@ -654,7 +659,13 @@ def main():
         sem_wd = p.ndim <= 1
         grupos.append({"params": p, "weight_decay": 0.0 if sem_wd else args.wd})
     opt = torch.optim.AdamW(grupos, lr=args.lr)
-    passos_ep = math.ceil(len(X["treino"]) / args.lote)
+    if args.amostras_por_epoca is not None and (not args.reamostrar or
+                                               args.amostras_por_epoca < 1):
+        raise SystemExit("--amostras-por-epoca exige --reamostrar e valor positivo")
+    amostras_ep = args.amostras_por_epoca or len(X["treino"])
+    passos_ep = math.ceil(amostras_ep / args.lote)
+    print("[amostras] %d sorteios por epoca | %d passos | %d patches unicos"
+          % (amostras_ep, passos_ep, len(X["treino"])), flush=True)
     total, aquec = args.epocas * passos_ep, args.aquecimento * passos_ep
 
     H, W = X["treino"].shape[2:]
@@ -715,8 +726,8 @@ def main():
             perm = rng.permutation(len(X["treino"]))
         else:
             # com reposicao: alguns patches saem 2x no epoch, outros nenhuma. O
-            # numero de passos por epoch nao muda, so a composicao do lote.
-            perm = rng.choice(len(X["treino"]), size=len(X["treino"]),
+            # --amostras-por-epoca permite igualar passos entre datasets.
+            perm = rng.choice(len(X["treino"]), size=amostras_ep,
                               replace=True, p=pesos)
         soma, n, t0 = 0.0, 0, time.monotonic()
         t_bloco, soma_bloco, n_bloco = time.monotonic(), 0.0, 0

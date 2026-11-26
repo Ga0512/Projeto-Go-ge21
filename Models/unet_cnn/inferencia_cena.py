@@ -98,6 +98,23 @@ def bandas(pan, valido, st, janela, niveis, dev=None):
     return np.stack([z(pan, "pan"), z(ent, "glcm"), z(rug, "rugosidade")]).astype(np.float32)
 
 
+def aplicar_fusao_pan_ndvi(x, receita):
+    """Reproduz no mapa inteiro os seis atributos do dataset v30."""
+    fusao = receita.get("fusao_pan_ndvi")
+    if not fusao:
+        return x
+    if fusao.get("formula") != "(PAN_z + NDVI_estatistica_z) / sqrt(2)":
+        raise ValueError("formula de fusao desconhecida no receita.json")
+    if x.shape[0] != 7:
+        raise ValueError("fusao PAN+NDVI precisa das sete bandas originais")
+    out = np.empty((6,) + x.shape[1:], dtype=np.float32)
+    for j in range(4):
+        out[j] = (x[0] + x[j + 3]) * np.float32(1 / np.sqrt(2))
+    out[4] = x[1]
+    out[5] = x[2]
+    return out
+
+
 def ler_extra(src, proj, gt, x0, y0, w, h):
     """Banda auxiliar reprojetada na grade EXATA da janela pedida.
 
@@ -319,6 +336,9 @@ def main():
     ap.add_argument("--ndvi-temporal", default=None, metavar="RASTER",
                     help="GeoTIFF original de quatro bandas (median/min/max/stdDev) "
                          "do wv_jatai_v4; aplica o mesmo z-score do gerador")
+    ap.add_argument("--ndvi-std-zscore", default=None, metavar="RASTER",
+                    help="substitui a sétima banda por um GeoTIFF de NDVI_stdDev "
+                         "já em z-score; requer --ndvi-temporal")
     ap.add_argument("--saida", default=None, help="pasta de saida")
     ap.add_argument("--faixa", type=int, default=1024, help="linhas por faixa")
     ap.add_argument("--overlap", type=int, default=300,
@@ -347,6 +367,8 @@ def main():
         ap.error("use --texturas-gpu ou --texturas-cpu, nao ambos")
     if args.banda_extra and args.ndvi_temporal:
         ap.error("use --banda-extra ou --ndvi-temporal, nao ambos")
+    if args.ndvi_std_zscore and not args.ndvi_temporal:
+        ap.error("--ndvi-std-zscore exige --ndvi-temporal")
     if args.ate_col and not args.ladrilho:
         ap.error("--ate-col exige --ladrilho")
     t_inicio = time.monotonic()
@@ -386,6 +408,13 @@ def main():
         ndvi_src, ndvi_vrts, ndvi_est = preparar_ndvi_temporal(args.ndvi_temporal)
         print("[ndvi-temporal] quatro bandas | media/desvio: %s"
               % ", ".join("%.4f/%.4f" % est for est in ndvi_est), flush=True)
+    std_antigo = None
+    if args.ndvi_std_zscore:
+        std_antigo = gdal.Open(args.ndvi_std_zscore)
+        if std_antigo is None or std_antigo.RasterCount != 1:
+            raise SystemExit("--ndvi-std-zscore precisa de GeoTIFF de uma banda")
+        print("[ndvi-std-zscore] substituindo a sétima banda com %s"
+              % args.ndvi_std_zscore, flush=True)
     margem_peso = ck_args.get("margem", 15)
     print("[modelo] %s | %s base=%d | epoca %s (val mIoU=%.4f) | passo %d"
           % (nome_run, arq, base, ck.get("epoca", "?"),
@@ -399,7 +428,11 @@ def main():
         raise SystemExit("--passo precisa estar entre 1 e %d" % P)
     canais_esperados = next(v for k, v in ck["state_dict"].items()
                              if k.endswith("weight") and v.ndim == 4).shape[1]
-    canais_entrada = 3 + int(extra_src is not None) + (4 if ndvi_vrts else 0)
+    fusao = receita.get("fusao_pan_ndvi")
+    if fusao and (ndvi_vrts is None or extra_src is not None):
+        raise SystemExit("dataset fundido exige --ndvi-temporal e dispensa --banda-extra")
+    canais_entrada = (6 if fusao else
+                      3 + int(extra_src is not None) + (4 if ndvi_vrts else 0))
     if canais_entrada != canais_esperados:
         raise SystemExit("modelo espera %d bandas; entrada montaria %d"
                          % (canais_esperados, canais_entrada))
@@ -505,9 +538,13 @@ def main():
                         [X, ler_extra(extra_src, proj, gt, xa, ya,
                                       xb - xa, yb - ya)[None]], 0)
                 if ndvi_vrts is not None:
-                    X = np.concatenate(
-                        [X, ler_ndvi_temporal(ndvi_vrts, ndvi_est, proj, gt,
-                                              xa, ya, xb - xa, yb - ya)], 0)
+                    extras = ler_ndvi_temporal(ndvi_vrts, ndvi_est, proj, gt,
+                                                xa, ya, xb - xa, yb - ya)
+                    if std_antigo is not None:
+                        extras[3] = ler_extra(std_antigo, proj, gt, xa, ya,
+                                              xb - xa, yb - ya)
+                    X = np.concatenate([X, extras], 0)
+                X = aplicar_fusao_pan_ndvi(X, receita)
                 X[:, ~valido] = 0
                 t = time.monotonic()
                 probs, _ = prever(modelo, X, args.passo, args.lote, dev, margem_peso)
@@ -538,6 +575,7 @@ def main():
                        "dataset": dataset, "passo": args.passo,
                        "ladrilho": args.ladrilho, "margem_peso": margem_peso,
                        "texturas": args.texturas, "ndvi_temporal": args.ndvi_temporal,
+                       "ndvi_std_zscore": args.ndvi_std_zscore,
                        "classes": dados.CLASS_NOMES, "repr_codigo": dados.REPR_CODIGO,
                        "estatisticas": st, "blocos": n_unidas,
                        "px_classificados_nesta_execucao": px_feitos,
@@ -578,9 +616,12 @@ def main():
             X = np.concatenate(
                 [X, ler_extra(extra_src, proj, gt, 0, ya, W, yb - ya)[None]], 0)
         if ndvi_vrts is not None:
-            X = np.concatenate(
-                [X, ler_ndvi_temporal(ndvi_vrts, ndvi_est, proj, gt,
-                                      0, ya, W, yb - ya)], 0)
+            extras = ler_ndvi_temporal(ndvi_vrts, ndvi_est, proj, gt,
+                                        0, ya, W, yb - ya)
+            if std_antigo is not None:
+                extras[3] = ler_extra(std_antigo, proj, gt, 0, ya, W, yb - ya)
+            X = np.concatenate([X, extras], 0)
+        X = aplicar_fusao_pan_ndvi(X, receita)
         X[:, ~valido] = 0
         t = time.monotonic()
         probs, _ = prever(modelo, X, args.passo, args.lote, dev, margem_peso,
@@ -613,6 +654,7 @@ def main():
                    "dataset": dataset, "passo": args.passo, "margem_peso": margem_peso,
                    "texturas": args.texturas, "classes": dados.CLASS_NOMES,
                    "repr_codigo": dados.REPR_CODIGO, "estatisticas": st,
+                   "fusao_pan_ndvi": fusao,
                    "faixas": n_unidas, "px_classificados": px_feitos,
                    "tempo_predicao_s": round(t_pred, 1),
                    "tempo_total_s": round(time.monotonic() - t_inicio, 1)},
