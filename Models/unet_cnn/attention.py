@@ -13,7 +13,7 @@ from torch import nn
 
 
 class ChannelAttention(nn.Module):
-    """CBAM channel gate; keeps at least ``min_hidden`` hidden channels."""
+    """Independent sigmoid gates for learned CBAM feature channels."""
 
     def __init__(self, channels, reduction=16, min_hidden=4):
         super().__init__()
@@ -26,13 +26,23 @@ class ChannelAttention(nn.Module):
             nn.Conv2d(hidden, channels, 1, bias=False),
         )
 
-    def weights(self, x):
+    def logits(self, x):
         avg = torch.mean(x, dim=(2, 3), keepdim=True)
         maximum = torch.amax(x, dim=(2, 3), keepdim=True)
-        return torch.sigmoid(self.mlp(avg) + self.mlp(maximum))
+        return self.mlp(avg) + self.mlp(maximum)
+
+    def weights(self, x):
+        return torch.sigmoid(self.logits(x))
 
     def forward(self, x):
         return x * self.weights(x)
+
+
+class InputBandAttention(ChannelAttention):
+    """A per-sample distribution over input bands; weights sum to one."""
+
+    def weights(self, x):
+        return torch.softmax(self.logits(x).float(), dim=1).to(x.dtype)
 
 
 class SpatialAttention(nn.Module):
@@ -69,14 +79,16 @@ class AttentionRouter(nn.Module):
     """Attach gates to named blocks of any CNN without changing those blocks."""
 
     def __init__(self, input_channels, node_channels, input_enabled=False,
-                 selected_nodes=()):
+                 selected_nodes=(), input_mode="softmax"):
         super().__init__()
+        if input_mode not in ("softmax", "sigmoid"):
+            raise ValueError("input_mode must be softmax or sigmoid")
         selected = set(selected_nodes)
         unknown = selected.difference(node_channels)
         if unknown:
             raise ValueError("unknown attention nodes: %s" % sorted(unknown))
-        self.input = (ChannelAttention(input_channels) if input_enabled
-                      else nn.Identity())
+        input_gate = InputBandAttention if input_mode == "softmax" else ChannelAttention
+        self.input = input_gate(input_channels) if input_enabled else nn.Identity()
         self.nodes = nn.ModuleDict({name: CBAM(channels)
                                     for name, channels in node_channels.items()
                                     if name in selected})

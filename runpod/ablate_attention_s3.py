@@ -50,6 +50,8 @@ def main():
     ap.add_argument("--epochs", type=int, default=30)
     ap.add_argument("--patience", type=int, default=10)
     ap.add_argument("--warmup", type=int, default=2)
+    ap.add_argument("--input-attention-mode", choices=["softmax", "sigmoid"],
+                    default="softmax")
     ap.add_argument("--border-radius", type=int, default=5)
     ap.add_argument("--border-alpha", type=float, default=4.0)
     a = ap.parse_args()
@@ -80,6 +82,8 @@ def main():
     for variant in a.variants:
         name = a.name_prefix + "_attn_" + variant
         run = MODELS / "unet_cnn" / "runs" / name
+        if (run / "modelo_melhor.pth").exists():
+            raise FileExistsError("run already has a checkpoint; use a new name: " + name)
         run.mkdir(parents=True, exist_ok=True)
         log = run / "rodada_s3.log"
         print("\n[variant] %s" % name, flush=True)
@@ -120,6 +124,8 @@ def main():
                      "--borda-raio", str(a.border_radius),
                      "--borda-alfa", str(a.border_alpha), "--seed", "42"]
             train.extend(VARIANTS[variant])
+            if "--attention-input" in VARIANTS[variant]:
+                train.extend(("--attention-input-mode", a.input_attention_mode))
             comando(train, log, ao_ler=upload_checkpoint)
             if not (run / "modelo_melhor.pth").is_file():
                 raise FileNotFoundError("treino sem modelo_melhor.pth: " + name)

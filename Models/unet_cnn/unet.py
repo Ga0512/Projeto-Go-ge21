@@ -7,6 +7,7 @@ Uso (no WSL, a partir de Models/):
   PYTHONPATH=unet_cnn ../Data/.venv/bin/python -c "from unet import build_model; print(build_model('unetpp', 7, 3))"
 """
 
+import ambiente  # noqa: F401  (configure caches before importing torch)
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -53,7 +54,8 @@ class UNet(nn.Module):
 
     def __init__(self, in_chans=3, n_classes=4, base=32,
                  attention_input=False, attention_encoder=False,
-                 attention_decoder=False, attention_nodes=None):
+                 attention_decoder=False, attention_nodes=None,
+                 attention_input_mode="softmax"):
         super().__init__()
         node_channels = {"e0": base, "e1": base * 2, "e2": base * 4,
                          "e3": base * 8, "bot": base * 8,
@@ -62,7 +64,8 @@ class UNet(nn.Module):
         self.attention = AttentionRouter(
             in_chans, node_channels, attention_input,
             _selected_nodes(attention_encoder, attention_decoder,
-                            UNET_DECODER_NODES, attention_nodes))
+                            UNET_DECODER_NODES, attention_nodes),
+            input_mode=attention_input_mode)
         self.e0 = ConvBloco(in_chans, base)                            #  32 @ 256
         self.e1 = nn.Sequential(nn.MaxPool2d(2), ConvBloco(base, base * 2))    #  64 @ 128
         self.e2 = nn.Sequential(nn.MaxPool2d(2), ConvBloco(base * 2, base * 4))  # 128 @  64
@@ -107,7 +110,8 @@ class UNetPP(nn.Module):
 
     def __init__(self, in_chans=3, n_classes=4, base=32,
                  attention_input=False, attention_encoder=False,
-                 attention_decoder=False, attention_nodes=None):
+                 attention_decoder=False, attention_nodes=None,
+                 attention_input_mode="softmax"):
         super().__init__()
         c = [base * (2 ** i) for i in range(5)]          # 32,64,128,256,512 (base 32)
         node_channels = {"e0": c[0], "e1": c[1], "e2": c[2], "e3": c[3],
@@ -116,7 +120,8 @@ class UNetPP(nn.Module):
         self.attention = AttentionRouter(
             in_chans, node_channels, attention_input,
             _selected_nodes(attention_encoder, attention_decoder,
-                            UNETPP_DECODER_NODES, attention_nodes))
+                            UNETPP_DECODER_NODES, attention_nodes),
+            input_mode=attention_input_mode)
         self.e0 = ConvBloco(in_chans, c[0])              # 256
         self.e1 = nn.Sequential(nn.MaxPool2d(2), ConvBloco(c[0], c[1]))    # 128
         self.e2 = nn.Sequential(nn.MaxPool2d(2), ConvBloco(c[1], c[2]))    #  64
@@ -164,10 +169,11 @@ class UNetPP(nn.Module):
 
 def build_model(architecture, in_chans, n_classes, base=32,
                 attention_input=False, attention_encoder=False,
-                attention_decoder=False, attention_nodes=None):
+                attention_decoder=False, attention_nodes=None,
+                attention_input_mode="softmax"):
     """Single model factory for training, evaluation and inference."""
     options = (in_chans, n_classes, base, attention_input, attention_encoder,
-               attention_decoder, attention_nodes)
+               attention_decoder, attention_nodes, attention_input_mode)
     if architecture == "unetpp":
         return UNetPP(*options)
     if architecture == "unet":
@@ -203,6 +209,7 @@ def model_from_checkpoint(checkpoint, n_classes):
         args.get("attention_input", args.get("atencao_entrada", False)),
         args.get("attention_encoder", args.get("cbam_encoder", False)),
         args.get("attention_decoder", args.get("cbam_decoder", False)),
-        args.get("attention_nodes", args.get("cbam_nos")))
+        args.get("attention_nodes", args.get("cbam_nos")),
+        args.get("attention_input_mode", "sigmoid"))
     model.load_state_dict(state, strict=True)
     return model

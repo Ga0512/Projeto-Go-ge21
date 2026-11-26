@@ -1,7 +1,7 @@
 # Configurable attention for U-Net and U-Net++
 
-`attention.py` provides reusable `ChannelAttention`, `SpatialAttention`,
-`CBAM`, and `AttentionRouter` modules. The same placement options work in
+`attention.py` provides reusable `InputBandAttention`, `ChannelAttention`,
+`SpatialAttention`, `CBAM`, and `AttentionRouter` modules. The same placement options work in
 `unet_cnn/train.py` and `runpod/rodada_unet_s3.py`:
 
 | Option | Effect |
@@ -18,7 +18,12 @@ placing attention there would not affect predictions, so it is excluded.
 
 To switch from input plus decoder to **encoder only**, remove the input and
 decoder options and use `--attention-encoder`. No model source edit is needed.
-The input gate produces one weight per band and patch. Encoder and decoder
+The input gate uses softmax across the input bands: its seven weights sum to
+one for every patch. CBAM on learned features retains independent sigmoid
+gates. `--attention-input-mode sigmoid` exists only to reproduce older input
+attention runs. Checkpoints store the mode; checkpoints without it are loaded
+as legacy sigmoid models, so their predictions do not silently change.
+Encoder and decoder
 gates operate on learned features, so their channels do not correspond to
 individual input bands.
 
@@ -61,8 +66,14 @@ it does not estimate segmentation quality.
 ```
 
 `attention_validation.csv` and `attention_test.csv` contain seven weights per
-patch, a patch ID, scene, and label fractions. The matching `_summary.json`
+patch, their sum, a patch ID, scene, and label fractions. New softmax runs
+check that the sum is one for every patch. The matching `_summary.json`
 files aggregate them by band and majority class. These weights are adaptive
 gates, not causal importance scores; per-band occlusion is needed to measure
 the effect of removing a band. The RunPod workflow uploads audit files to S3
 when `--attention-input` is enabled.
+
+The previous `unetpp_spot5_colinas_v28_attn_input_decoder` checkpoint used
+legacy sigmoid gates. Its audited weights do not sum to one. A corrected
+softmax run must use a new name and train from scratch; normalizing its CSV
+afterward would not change the model it learned.

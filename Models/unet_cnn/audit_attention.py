@@ -2,7 +2,8 @@
 """Export per-patch input channel attention weights for a trained CNN.
 
 Each CSV row records one patch, its class fractions and one gate weight per
-input band. Gate weights are not causal measures of band importance.
+input band. New softmax checkpoints sum to one per patch; legacy sigmoid
+checkpoints retain independent gates. Weights are not causal band importance.
 
 Uso (no WSL, a partir de Models/):
   ../Data/.venv/bin/python unet_cnn/audit_attention.py \
@@ -53,6 +54,7 @@ def main():
     model_args = checkpoint.get("args", {})
     if not model_args.get("attention_input", model_args.get("atencao_entrada", False)):
         raise SystemExit("checkpoint has no input channel attention")
+    input_mode = model_args.get("attention_input_mode", "sigmoid")
     model = model_from_checkpoint(checkpoint, dados.N_CLASSES).to(device).eval()
     if checkpoint["state_dict"]["e0.net.0.weight"].shape[1] != len(bands):
         raise SystemExit("recipe band count differs from checkpoint")
@@ -62,7 +64,7 @@ def main():
         output = os.path.join(run_dir, "attention_%s.csv" % split)
         rows = []
         by_majority = {c: [] for c in range(dados.N_CLASSES)}
-        header = (["patch", "scene", "majority_class"]
+        header = (["patch", "scene", "majority_class", "band_weight_sum"]
                   + ["class_fraction_%d" % c for c in range(dados.N_CLASSES)]
                   + ["band_weight_%d_%s" % (i + 1, band)
                      for i, band in enumerate(bands)])
@@ -75,12 +77,16 @@ def main():
                 with torch.inference_mode():
                     weights = model.input_attention_weights(
                         torch.from_numpy(images).to(device)).cpu().numpy()
+                if input_mode == "softmax" and not np.allclose(
+                        weights.sum(axis=1), 1.0, atol=1e-5):
+                    raise RuntimeError("input attention weights do not sum to one")
                 for name, label, weight in zip(batch, labels, weights):
                     counts = np.bincount(label[label != dados.IGNORE].ravel(),
                                          minlength=dados.N_CLASSES)
                     fractions = counts / max(int(counts.sum()), 1)
                     majority = int(np.argmax(fractions)) if counts.sum() else -1
-                    writer.writerow([name, scene_by_patch[name], majority]
+                    writer.writerow([name, scene_by_patch[name], majority,
+                                     float(weight.sum())]
                                     + [float(v) for v in fractions]
                                     + [float(v) for v in weight])
                     rows.append(weight)
@@ -90,7 +96,11 @@ def main():
         summary = {
             "run": args.name, "dataset": os.path.abspath(args.dataset),
             "split": split, "bands": bands, "class_names": dados.CLASS_NOMES,
-            "epoch": checkpoint.get("epoca"), "all": summarize(rows),
+            "epoch": checkpoint.get("epoca"),
+            "input_attention_mode": input_mode,
+            "weight_sum_min": float(min(row.sum() for row in rows)),
+            "weight_sum_max": float(max(row.sum() for row in rows)),
+            "all": summarize(rows),
             "by_majority_class": {
                 str(c): summarize(group) for c, group in by_majority.items() if group},
         }

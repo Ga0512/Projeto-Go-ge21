@@ -15,6 +15,7 @@ import ambiente  # noqa: F401  (configure caches before importing torch)
 import torch
 import torch.nn.functional as F
 
+from attention import InputBandAttention
 from inferencia_cena import carregar_modelo
 from unet import build_model, model_from_checkpoint
 
@@ -38,6 +39,8 @@ def train_step(architecture, device, **attention):
 
 
 def checkpoint(model, architecture, **attention):
+    if attention.get("attention_input"):
+        attention.setdefault("attention_input_mode", "softmax")
     return {"args": {"architecture": architecture, "base": 32, **attention},
             "state_dict": {k: v.cpu() for k, v in model.state_dict().items()}}
 
@@ -62,6 +65,9 @@ def legacy_checkpoint(current):
 
 
 def main():
+    sample_weights = InputBandAttention(7).weights(torch.randn(3, 7, 16, 16))
+    assert torch.allclose(sample_weights.sum(dim=1, keepdim=True),
+                          torch.ones(3, 1, 1, 1), atol=1e-6)
     device = ambiente.exigir_gpu()
     torch.manual_seed(42)
     unetpp, image, first_loss = train_step(
@@ -69,10 +75,19 @@ def main():
     with torch.inference_mode():
         weights = unetpp.input_attention_weights(image)
     assert weights.shape == (1, 7) and bool(((weights > 0) & (weights < 1)).all())
+    assert torch.allclose(weights.sum(dim=1), torch.ones(1, device=device), atol=1e-6)
     new = checkpoint(unetpp, "unetpp", attention_input=True,
                      attention_decoder=True)
     model_from_checkpoint(new, 3)
-    model_from_checkpoint(legacy_checkpoint(new), 3)
+    legacy_model = build_model("unetpp", 7, 3, attention_input=True,
+                               attention_decoder=True,
+                               attention_input_mode="sigmoid")
+    legacy = legacy_checkpoint(checkpoint(legacy_model, "unetpp",
+                                          attention_input=True,
+                                          attention_decoder=True,
+                                          attention_input_mode="sigmoid"))
+    old_loaded = model_from_checkpoint(legacy, 3)
+    assert type(old_loaded.attention.input) is type(legacy_model.attention.input)
     unetpp_selective = build_model("unetpp", 7, 3, attention_nodes=["e1", "x03"])
     assert set(unetpp_selective.attention.nodes) == {"e1", "x03"}
 
@@ -82,7 +97,9 @@ def main():
         path = os.path.join(directory, "model.pth")
         torch.save(new, path)
         loaded, _, _, _ = carregar_modelo(path, "cpu", 3)
-        assert loaded.input_attention_weights(torch.zeros(1, 7, 32, 32)).shape == (1, 7)
+        loaded_weights = loaded.input_attention_weights(torch.zeros(1, 7, 32, 32))
+        assert loaded_weights.shape == (1, 7)
+        assert torch.allclose(loaded_weights.sum(dim=1), torch.ones(1), atol=1e-6)
 
     del unetpp, image
     torch.cuda.empty_cache()

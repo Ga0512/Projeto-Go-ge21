@@ -461,6 +461,9 @@ def main():
                     help=argparse.SUPPRESS)
     ap.add_argument("--attention-input", action="store_true",
                     help="channel attention on the original input bands")
+    ap.add_argument("--attention-input-mode", choices=["softmax", "sigmoid"],
+                    default="softmax",
+                    help="softmax weights sum to 1 across bands; sigmoid loads legacy runs")
     ap.add_argument("--attention-encoder", action="store_true",
                     help="CBAM after every encoder block")
     ap.add_argument("--attention-decoder", action="store_true",
@@ -629,7 +632,8 @@ def main():
 
     modelo = build_model(args.architecture, X["treino"].shape[1], N, args.base,
                          args.attention_input, args.attention_encoder,
-                         args.attention_decoder, args.attention_nodes).to(dev)
+                         args.attention_decoder, args.attention_nodes,
+                         args.attention_input_mode).to(dev)
     if args.inicializar:
         ck = torch.load(args.inicializar, map_location="cpu", weights_only=False)
         sd = normalized_state_dict(ck["state_dict"])
@@ -670,6 +674,11 @@ def main():
         if not os.path.exists(cam_ultimo):
             raise SystemExit("--resume: %s não existe" % cam_ultimo)
         ck = torch.load(cam_ultimo, map_location="cpu", weights_only=False)
+        previous_args = ck.get("args", {})
+        if args.attention_input and previous_args.get("attention_input_mode", "sigmoid") != args.attention_input_mode:
+            raise SystemExit("--resume: input attention mode differs from checkpoint; "
+                             "pass --attention-input-mode %s" %
+                             previous_args.get("attention_input_mode", "sigmoid"))
         modelo.load_state_dict(ck["state_dict"])
         # `opt` nulo = checkpoint remendado de um treino anterior ao --resume (os
         # momentos do AdamW se refazem em algumas dezenas de passos, mas o
