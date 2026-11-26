@@ -3,8 +3,8 @@
 
 Uso (no WSL, a partir de Models/; tambem dentro do Pod):
   ../Data/.venv/bin/python -u ../runpod/ablate_attention_s3.py \
-    --dataset spot5_colinas_v28 --name-prefix unetpp_spot5_colinas_v28 \
-    --variants input_decoder encoder decoder --volume g643dn7nah \
+    --dataset spot5_colinas_v28 --name-prefix unetpp_spot5_colinas_v28_softmax \
+    --variants input_decoder --volume g643dn7nah \
     --datacenter US-GA-2
 
 O dataset e baixado uma vez. Cada variante usa a mesma receita, seed e splits.
@@ -19,7 +19,7 @@ import sys
 import time
 
 from rodada_unet_s3 import RAIZ, MODELS, PY, comando
-from subir import baixar, cliente, enviar
+from subir import baixar, cliente, enviar, remotos
 
 
 VARIANTS = {
@@ -82,6 +82,8 @@ def main():
     for variant in a.variants:
         name = a.name_prefix + "_attn_" + variant
         run = MODELS / "unet_cnn" / "runs" / name
+        if remotos(cli, a.volume, "Models/unet_cnn/runs/" + name + "/"):
+            raise FileExistsError("run already exists in S3; use a new name: " + name)
         if (run / "modelo_melhor.pth").exists():
             raise FileExistsError("run already has a checkpoint; use a new name: " + name)
         run.mkdir(parents=True, exist_ok=True)
