@@ -706,12 +706,14 @@ def main():
         print("[resume] %s | retomando no epoch %d | melhor até aqui: epoch %d "
               "(val mIoU=%.4f)" % (cam_ultimo, ep_inicio + 1, melhor_ep, melhor),
               flush=True)
-    # O `metricas()` devolve IoU/recall/precisão por classe a cada epoch; sem uma
-    # coluna por classe aqui, só o agregado sobrevive, e o agregado esconde
-    # justamente a classe rara (ver o `por_cena` do RF e do XGBoost no v18).
+    # Guarda todas as metricas derivadas da matriz de confusao em cada epoca.
+    # Assim a trajetoria da classe rara nao fica escondida pelo mIoU agregado.
     campos = (["epoca", "lr", "loss_treino", "val_oa", "val_miou"]
               + (["val_oa_borda", "val_miou_borda"] if faixa_val is not None else [])
-              + ["val_iou_%d" % c for c in range(N)]
+              + ["val_fwiou", "val_miou_presentes"]
+              + ["val_%s_%d" % (metrica, c)
+                 for metrica in ("iou", "f1", "precisao", "recall")
+                 for c in range(N)]
               + ["tempo_s"])
     livre = c_livre_gb()
     if livre < args.min_livre_c_gb:
@@ -789,11 +791,16 @@ def main():
         mb = (metricas(matriz(pred_val, Y["validacao"], faixa_val))
               if faixa_val is not None else None)
         reg = {"epoca": ep + 1, "lr": lr, "loss_treino": soma / n, "val_oa": m["oa"],
-               "val_miou": m["miou"], "tempo_s": round(time.monotonic() - t0, 2)}
+               "val_miou": m["miou"], "val_fwiou": m["fwiou"],
+               "val_miou_presentes": m["miou_presentes"],
+               "tempo_s": round(time.monotonic() - t0, 2)}
         if mb is not None:
             reg["val_miou_borda"] = mb["miou"]
             reg["val_oa_borda"] = mb["oa"]
-        reg.update(("val_iou_%d" % c, m["iou"][c]) for c in range(N))
+        for metrica, chave in (("iou", "iou"), ("f1", "f1"),
+                               ("precisao", "precisao"), ("recall", "acuracia")):
+            reg.update(("val_%s_%d" % (metrica, c), m[chave][c])
+                       for c in range(N))
         historico.append(reg)
         marca = ""
         if m["miou"] > melhor:
