@@ -98,6 +98,8 @@ WRAPPER
 fi
 
 "$PY" - <<'PY'
+import sys
+sys.path.insert(0, 'unet_cnn')
 import ambiente
 import torch
 from osgeo import gdal
