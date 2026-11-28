@@ -83,7 +83,8 @@ if ! command -v gdal-config >/dev/null || ! python -c 'from osgeo import gdal' >
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
         gdal-bin libgdal-dev python3-gdal python3-venv
 fi
-python -m pip install --disable-pip-version-check -q boto3 timm rasterio scipy matplotlib
+python -m pip install --disable-pip-version-check -q \
+    'numpy==1.26.4' boto3 timm rasterio scipy matplotlib
 if ! python -c 'from osgeo import gdal' >/dev/null 2>&1; then
     python -m pip install --disable-pip-version-check -q \
         --no-build-isolation "GDAL==$(gdal-config --version)"
@@ -105,8 +106,10 @@ import torch
 from osgeo import gdal
 import boto3
 assert torch.cuda.is_available(), 'GPU indisponivel'
+mem = gdal.GetDriverByName('MEM').Create('', 2, 2, 1, gdal.GDT_Byte)
+assert mem.ReadAsArray().shape == (2, 2), 'GDAL/NumPy incompatíveis'
 print('[ambiente]', torch.__version__, torch.cuda.get_device_name(0),
-      'GDAL', gdal.VersionInfo(), flush=True)
+      'GDAL', gdal.VersionInfo(), 'NumPy', __import__('numpy').__version__, flush=True)
 PY
 
 "$PY" -u "$ROOT/runpod/executar_s3.py" \
